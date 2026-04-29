@@ -8,70 +8,24 @@ credentials.
 
 ## What RB2 Does
 
-- Upload one or more RepeaterBook-style CSV files.
-- Parse conventional amateur repeater records.
-- Move through a step-by-step workflow: Import, Radio, Repeaters, Zones,
-  Export.
-- Choose the radio/export module and APX settings before reviewing repeater
-  data.
-- Select at least one target APX band before continuing from the Radio step.
-- Display repeaters in a review table after import.
-- Select or deselect repeaters.
-- Show only repeaters matching the selected target APX bands when bands are
-  selected in the Radio step.
-- Show the default channel name that will be exported.
-- Enable channel-name edit mode to customize exported channel names.
-- Enable imported-data edit mode to correct RX/TX frequency, tone, mode,
-  callsign, location, or P25 NAC data before export.
-- Create, rename, delete, and organize zones in the Zone Organizer.
-- Keep zone names within APX-safe Motorola mobile/portable character limits.
-- Keep unassigned channels in a left-side intake column and drag channel cards
-  into zone columns before export.
-- Move all unassigned channels into a zone in one action.
-- Reorder zones and reorder channel positions inside a zone; this order is used
-  for zone channel assignment position during export.
-- Organize selected channels automatically by state, county, city, amateur band,
-  or mode.
-- Export selected repeaters as Generic CSV.
-- Export selected APX-compatible analog FM and P25 conventional channels as APX
-  CPS-style XML for user review/import through Motorola CPS.
+- Imports one or more RepeaterBook-style CSV files.
+- Guides the user through Import, Radio, Repeaters, Zones, and Export steps.
+- Filters repeater data by selected APX target bands.
+- Lets users review, select, rename, and correct repeater channel data.
+- Builds zones with quick grouping, drag-and-drop organization, and manual
+  ordering.
+- Exports Motorola APX CPS XML files for the currently supported radio module.
+- Provides Generic CSV as a review/interchange export.
 
-APX CPS imports and exports XML files, not CSV. RB2's APX CPS XML export is
-still not a codeplug. It creates reviewable conventional system, personality,
-frequency option, and zone/channel assignment records for selected APX-compatible
-repeaters. The APX XML export lets you set the conventional system name and
-personality name base before downloading.
-For P25 conventional exports, RB2 maps RepeaterBook `Digital Access` NAC values
-from the CSV into APX Network ID fields. If a P25 row has no CSV NAC, RB2 uses
-the APX default P25 NAC value.
-RB2 automatically exports analog FM and P25 conventional APX channels based on
-RepeaterBook mode data. Rows that list both FM and P25 are exported as separate
-APX channels.
+Motorola APX is the first supported radio-programming export module. Future
+Motorola-focused modules are planned for TRBO and ASTRO workflows.
 
-For APX exports, choose the target radio bands before exporting. No APX bands
-are selected by default. RB2 currently
-supports VHF, UHF 1, and 900 MHz filtering for amateur-radio APX workflows.
-Choose APX Mobile or APX Portable so RB2 writes the matching zone/channel
-assignment fields. Mobile exports keep a selected RB2 zone together, while
-portable exports split zone channel assignments into 16-channel chunks for the
-selector knob positions. The Zone Organizer warns when a zone has more than 16
-channels because portable exports will split it into multiple CPS zones.
-For portable APX exports, choose SRX 2200 or APX 8000 so RB2 can account for
-known portable XML field differences. Portable exports leave TTS announcements
-disabled because TTS is not available on every radio/codeplug. Portable exports
-can set the top display channel name to either the callsign or the RX frequency.
+APX CPS imports and exports XML files, not CSV. RB2's APX CPS XML export creates
+reviewable conventional system, personality, frequency option, and zone/channel
+assignment records for CPS import. It is still not a native codeplug.
 
-RB2 includes a built-in APX conventional analog XML template, so users do not
-need to upload a CPS XML file before exporting APX CPS XML.
-
-For APX-oriented exports, RB2 uses conservative display-name handling: zone and
-channel names are limited to 14 ASCII characters, with the original value kept in
-Notes when an export value must be shortened. The APX review CSV export code is
-kept internally for development/auditing, but the normal GUI now presents APX CPS
-XML and Generic CSV downloads.
-
-RB2 does not generate APX scan lists yet because CPS scan members depend on the
-actual zone channel assignment number after import.
+See `docs/apx-cps-notes.md` for APX-specific behavior, naming limits, band
+filtering, P25 NAC handling, and current scan-list limitations.
 
 ## Important Scope
 
