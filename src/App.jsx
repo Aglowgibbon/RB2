@@ -28,6 +28,13 @@ function App() {
   const [repeaters, setRepeaters] = useState([])
   const [fileName, setFileName] = useState('')
   const [message, setMessage] = useState('Upload a RepeaterBook-style CSV to begin.')
+  const [apxOptions, setApxOptions] = useState({
+    personalityName: 'RB2',
+    radioType: 'mobile',
+    portableModel: 'srx2200',
+    portableTopChannelName: 'callsign',
+    enabledBands: [],
+  })
 
   const selectedRepeaters = useMemo(
     () => repeaters.filter((repeater) => repeater.selected),
@@ -102,7 +109,7 @@ function App() {
     }
 
     if (type === 'apxXml') {
-      const xmlExport = exportApxCpsXml(selectedRepeaters)
+      const xmlExport = exportApxCpsXml(selectedRepeaters, apxOptions)
       if (xmlExport.channelCount === 0) {
         setMessage(xmlExport.message)
         return
@@ -155,6 +162,8 @@ function App() {
 
         <ExportPanel
           selectedCount={selectedRepeaters.length}
+          apxOptions={apxOptions}
+          onApxOptionsChange={setApxOptions}
           onExport={handleExport}
         />
       </section>

@@ -20,8 +20,26 @@ credentials.
 
 APX CPS imports and exports XML files, not CSV. RB2's APX CPS XML export is
 still not a codeplug. It creates reviewable conventional system, personality,
-frequency option, zone/channel assignment, and scan-list records for selected FM
-repeaters only.
+frequency option, and zone/channel assignment records for selected FM repeaters
+only.
+For P25 conventional exports, RB2 maps RepeaterBook `Digital Access` NAC values
+from the CSV into APX Network ID fields. RB2 does not invent NAC values for P25
+channels; P25 rows without a CSV NAC are skipped from the APX XML export.
+RB2 automatically exports analog FM and P25 conventional APX channels based on
+RepeaterBook mode data. Rows that list both FM and P25 are exported as separate
+APX channels.
+
+For APX exports, choose the target radio bands before exporting. No APX bands
+are selected by default. RB2 currently
+supports VHF, UHF 1, UHF 2, 700/800 MHz, and 900 MHz filtering.
+Choose APX Mobile or APX Portable so RB2 writes the matching zone/channel
+assignment fields. Mobile exports keep a selected RB2 zone together, while
+portable exports split zone channel assignments into 16-channel chunks for the
+selector knob positions.
+For portable APX exports, choose SRX 2200 or APX 8000 so RB2 can account for
+known portable XML field differences. Portable exports leave TTS announcements
+disabled because TTS is not available on every radio/codeplug. Portable exports
+can set the top display channel name to either the callsign or the RX frequency.
 
 RB2 includes a built-in APX conventional analog XML template, so users do not
 need to upload a CPS XML file before exporting APX CPS XML.
@@ -30,6 +48,9 @@ For APX-oriented exports, RB2 uses conservative display-name handling: zone and
 channel names are limited to 14 ASCII characters, with the original value kept in
 Notes when an export value must be shortened. The APX review CSV is only for
 auditing the generated fields outside CPS.
+
+RB2 does not generate APX scan lists yet because CPS scan members depend on the
+actual zone channel assignment number after import.
 
 ## Important Scope
 

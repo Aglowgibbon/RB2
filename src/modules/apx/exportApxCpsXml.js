@@ -1,26 +1,33 @@
 import { sanitizeApxName } from './apxConstraints.js'
+import { repeaterMatchesApxBands } from './apxBands.js'
 
-const MAX_CHANNELS_PER_ZONE = 16
+const PORTABLE_CHANNELS_PER_ZONE = 16
 
 export function exportApxCpsXml(repeaters, options = {}) {
-  const supported = repeaters.filter((repeater) => repeater.mode === 'FM')
-  const skipped = repeaters.length - supported.length
-  const channels = supported.map(toApxChannel)
-  const zones = buildZones(channels)
-  const scanLists = zones.map((zone, index) => ({
-    alias: sanitizeApxName(`RB2 Scan ${index + 1}`),
-    members: zone.channels,
+  const enabledBands = options.enabledBands || []
+  const radioType = options.radioType === 'portable' ? 'portable' : 'mobile'
+  const portableModel =
+    options.portableModel === 'apx8000' ? 'apx8000' : 'srx2200'
+  const portableTopChannelName =
+    options.portableTopChannelName === 'rxFrequency' ? 'rxFrequency' : 'callsign'
+  const expandedChannels = expandApxChannels(repeaters)
+  const skippedModeCount = repeaters.length - expandedChannels.sourceCount
+  const supportedChannels = expandedChannels.channels.filter((channel) =>
+    repeaterMatchesApxBands(channel, enabledBands),
+  )
+  const skippedBandCount = expandedChannels.channels.length - supportedChannels.length
+  const personalityBaseName =
+    sanitizeApxName(options.personalityName || 'RB2') || 'RB2'
+  const personalityNames = buildPersonalityNames(
+    supportedChannels,
+    personalityBaseName,
+  )
+  const channels = supportedChannels.map((channel, index) => ({
+    ...channel,
+    position: index + 1,
+    personalityName: personalityNames[channel.channelType],
   }))
-
-  if (options.templateXml) {
-    return exportApxCpsXmlFromTemplate({
-      templateXml: options.templateXml,
-      channels,
-      zones,
-      scanLists,
-      skipped,
-    })
-  }
+  const zones = buildZones(channels, radioType)
 
   const lines = [
     '<?xml version="1.0" encoding="UTF-8"?>',
@@ -28,291 +35,149 @@ export function exportApxCpsXml(repeaters, options = {}) {
     '  <Version>2</Version>',
     '  <Language>en</Language>',
     '  <Root ExportedAllFeatures="False" ConverterGenerated="False">',
-    renderConventionalPersonality(channels, scanLists[0]?.alias || 'RB2 Scan 1'),
-    renderConventionalSystem(),
-    renderScanLists(scanLists),
-    renderZoneChannelAssignments(zones),
+    renderConventionalPersonalities(
+      channels,
+      personalityNames,
+      radioType,
+      portableModel,
+    ),
+    renderConventionalSystem(radioType, portableModel, hasP25Channels(channels)),
+    renderZoneChannelAssignments(
+      zones,
+      radioType,
+      portableModel,
+      portableTopChannelName,
+    ),
     '  </Root>',
     '</import_export_doc>',
     '',
   ]
 
   const skippedText =
-    skipped > 0
-      ? ` Skipped ${skipped} non-FM record${skipped === 1 ? '' : 's'} because APX conventional import is analog FM/P25 oriented and RB2 cannot convert DMR, D-STAR, or Fusion protocols.`
+    skippedModeCount > 0
+      ? ` Skipped ${skippedModeCount} mode-incompatible record${skippedModeCount === 1 ? '' : 's'} because no APX FM or P25 channel could be inferred.`
       : ''
+  const bandText =
+    skippedBandCount > 0
+      ? ` Skipped ${skippedBandCount} APX channel${skippedBandCount === 1 ? '' : 's'} outside the selected APX bands.`
+      : ''
+  const nacText =
+    expandedChannels.skippedNacCount > 0
+      ? ` Skipped ${expandedChannels.skippedNacCount} P25 channel${expandedChannels.skippedNacCount === 1 ? '' : 's'} without a valid RepeaterBook NAC/Digital Access value.`
+      : ''
+
+  const noChannelsReason =
+    expandedChannels.skippedNacCount > 0 && !skippedModeCount && !skippedBandCount
+      ? 'all P25 channels were missing valid RepeaterBook NAC/Digital Access values'
+      : 'the selection did not include compatible APX channels in the selected bands'
 
   const message =
     channels.length === 0
-      ? `No APX CPS XML was downloaded because the selection did not include FM conventional repeaters.${skippedText}`
-      : `Created APX CPS XML with ${channels.length} FM conventional channel${channels.length === 1 ? '' : 's'}.${skippedText}`
+      ? `No APX CPS XML was downloaded because ${noChannelsReason}.${skippedText}${bandText}${nacText}`
+      : `Created APX CPS XML with ${channels.length} APX channel${channels.length === 1 ? '' : 's'} and no scan list.${skippedText}${bandText}${nacText}`
 
   return {
     content: lines.join('\r\n'),
     channelCount: channels.length,
-    skippedCount: skipped,
+    skippedCount: skippedModeCount + skippedBandCount + expandedChannels.skippedNacCount,
     message,
   }
 }
 
-function exportApxCpsXmlFromTemplate({ templateXml, channels, zones, scanLists, skipped }) {
-  const parser = new DOMParser()
-  const templateDoc = parser.parseFromString(templateXml, 'application/xml')
+function expandApxChannels(repeaters) {
+  const channels = []
+  let sourceCount = 0
+  let skippedNacCount = 0
 
-  if (templateDoc.querySelector('parsererror')) {
-    return fallbackTemplateError(channels, skipped, 'The APX template XML could not be parsed.')
+  repeaters.forEach((repeater, index) => {
+    const sourceModes = getSourceModes(repeater)
+    const hasAnalog = hasAnalogFmMode(repeater, sourceModes)
+    const hasP25 = hasP25Mode(sourceModes)
+
+    if (hasAnalog || hasP25) sourceCount += 1
+    if (hasAnalog) channels.push(toApxChannel(repeater, index, 'analog', hasP25))
+    if (hasP25) {
+      const networkId = getP25NetworkId(repeater)
+      if (networkId) {
+        channels.push(toApxChannel(repeater, index, 'p25', hasAnalog, networkId))
+      } else {
+        skippedNacCount += 1
+      }
+    }
+  })
+
+  return { channels, sourceCount, skippedNacCount }
+}
+
+function getSourceModes(repeater) {
+  return String(
+    repeater.source?.Modes || repeater.source?.Mode || repeater.mode || '',
+  ).toUpperCase()
+}
+
+function hasAnalogFmMode(repeater, sourceModes) {
+  if (/(DMR|D-?STAR|NXDN)/.test(sourceModes) && !/\bFM\b/.test(sourceModes)) {
+    return false
   }
+  return /\bFM\b/.test(sourceModes) || repeater.mode === 'FM'
+}
 
-  const sourceRoot = templateDoc.querySelector('Root')
-  const personalityTemplate =
-    findNode(templateDoc, 'Conventional Personality', 'HAM MAIN') ||
-    firstNode(templateDoc, 'Conventional Personality')
-  const systemTemplate =
-    findNode(templateDoc, 'Conventional System', 'Cnv Sys 3') ||
-    firstNode(templateDoc, 'Conventional System')
-  const scanTemplate = firstNode(templateDoc, 'Scan List')
-  const zoneTemplate = firstNode(templateDoc, 'Zone Channel Assignment')
+function hasP25Mode(sourceModes) {
+  return /P-?25|P25/.test(sourceModes)
+}
 
-  if (!sourceRoot || !personalityTemplate || !systemTemplate || !scanTemplate || !zoneTemplate) {
-    return fallbackTemplateError(
-      channels,
-      skipped,
-      'The APX template XML is missing a conventional personality, system, scan list, or zone assignment template.',
-    )
+function buildPersonalityNames(channels, personalityBaseName) {
+  const hasAnalog = channels.some((channel) => channel.channelType === 'analog')
+  const hasP25 = channels.some((channel) => channel.channelType === 'p25')
+
+  if (hasAnalog && hasP25) {
+    return {
+      analog: sanitizeApxName(`${personalityBaseName} Analog`),
+      p25: sanitizeApxName(`${personalityBaseName} P25`),
+    }
   }
-
-  const outputDoc = document.implementation.createDocument('', 'import_export_doc')
-  const rootElement = outputDoc.documentElement
-  appendTextElement(outputDoc, rootElement, 'Version', '2')
-  appendTextElement(outputDoc, rootElement, 'Language', 'en')
-
-  const outputRoot = outputDoc.createElement('Root')
-  outputRoot.setAttribute('ExportedAllFeatures', sourceRoot.getAttribute('ExportedAllFeatures') || 'False')
-  outputRoot.setAttribute('ConverterGenerated', 'False')
-  rootElement.appendChild(outputRoot)
-
-  outputRoot.appendChild(
-    buildTemplateRecset(outputDoc, 'Conventional Personality', '2059', [
-      buildTemplatePersonality(outputDoc, personalityTemplate, channels, scanLists[0]?.alias || 'RB2 Scan 1'),
-    ]),
-  )
-  outputRoot.appendChild(
-    buildTemplateRecset(outputDoc, 'Conventional System', '2053', [
-      buildTemplateSystem(outputDoc, systemTemplate),
-    ]),
-  )
-  outputRoot.appendChild(
-    buildTemplateRecset(
-      outputDoc,
-      'Scan List',
-      '2057',
-      scanLists.map((scanList, index) =>
-        buildTemplateScanList(outputDoc, scanTemplate, scanList, index + 1),
-      ),
-    ),
-  )
-  outputRoot.appendChild(
-    buildTemplateRecset(
-      outputDoc,
-      'Zone Channel Assignment',
-      '2051',
-      zones.map((zone) => buildTemplateZone(outputDoc, zoneTemplate, zone)),
-    ),
-  )
-
-  const serializer = new XMLSerializer()
-  const content = `${serializer.serializeToString(outputDoc)}\r\n`
-  const skippedText =
-    skipped > 0
-      ? ` Skipped ${skipped} non-FM record${skipped === 1 ? '' : 's'} because RB2 does not convert DMR, D-STAR, or Fusion protocols.`
-      : ''
 
   return {
-    content,
-    channelCount: channels.length,
-    skippedCount: skipped,
-    message: `Created template-based APX CPS XML with ${channels.length} FM conventional channel${channels.length === 1 ? '' : 's'}.${skippedText}`,
+    analog: personalityBaseName,
+    p25: personalityBaseName,
   }
 }
 
-function buildTemplateRecset(doc, name, id, nodes) {
-  const recset = doc.createElement('Recset')
-  recset.setAttribute('Name', name)
-  recset.setAttribute('Id', id)
-  nodes.forEach((node) => recset.appendChild(node))
-  return recset
+function hasP25Channels(channels) {
+  return channels.some((channel) => channel.channelType === 'p25')
 }
 
-function buildTemplateSystem(doc, templateNode) {
-  const node = cloneInto(doc, templateNode)
-  node.setAttribute('ReferenceKey', 'RB2 Cnv Sys')
-  setXmlField(node, 'Conventional System Name', 'RB2 Cnv Sys')
-  return node
-}
-
-function buildTemplatePersonality(doc, templateNode, channels, scanListAlias) {
-  const node = cloneInto(doc, templateNode)
-  node.setAttribute('ReferenceKey', 'RB2 Analog')
-  setXmlField(node, 'Conventional Personality Name', 'RB2 Analog')
-  setXmlField(node, 'Non-ASTRO\\System Number', 'RB2 Cnv Sys')
-  setXmlField(node, 'ASTRO\\ASTRO System', '<None>')
-  setXmlField(node, 'Scan\\Scan List Selection', scanListAlias)
-
-  const frequencyRecset = node.querySelector('EmbeddedRecset[Name="Frequency Options"]')
-  const frequencyTemplate = frequencyRecset?.querySelector('EmbeddedNode')
-  if (frequencyRecset && frequencyTemplate) {
-    removeChildren(frequencyRecset)
-    channels.forEach((channel) =>
-      frequencyRecset.appendChild(buildTemplateFrequencyOption(doc, frequencyTemplate, channel)),
-    )
-  }
-
-  return node
-}
-
-function buildTemplateFrequencyOption(doc, templateNode, channel) {
-  const node = cloneInto(doc, templateNode)
-  const txTone = toneFields('Tx', channel.txTone)
-  const rxTone = toneFields('Rx / TA', channel.rxTone)
-
-  node.setAttribute('ReferenceKey', channel.frequencyName)
-  setXmlField(node, 'Rx / TA Frequency (MHz)', channel.rxFrequency)
-  setXmlField(node, 'Tx Frequency (MHz)', channel.txFrequency)
-  setXmlField(node, 'Tx Squelch Type', txTone.type)
-  setXmlField(node, 'Rx / TA Squelch Type', rxTone.type)
-  setXmlField(node, 'Tx PL Freq', txTone.plFreq)
-  setXmlField(node, 'Rx / TA PL Freq', rxTone.plFreq)
-  setXmlField(node, 'Tx DPL Code', txTone.dplCode)
-  setXmlField(node, 'Rx / TA DPL Code', rxTone.dplCode)
-  setXmlField(node, 'Direct / Talkaround', channel.talkaround ? 'True' : 'False')
-  setXmlField(node, 'Tx Deviation / Channel Spacing', channel.spacing)
-  setXmlField(node, 'Name', channel.frequencyName)
-  return node
-}
-
-function buildTemplateScanList(doc, templateNode, scanList, index) {
-  const node = cloneInto(doc, templateNode)
-  const firstMember = scanMemberReference(scanList.members[0])
-
-  node.setAttribute('ReferenceKey', scanList.alias)
-  setXmlField(node, 'Scan List Alias', scanList.alias)
-  setXmlField(node, 'Designated Voice Tx Member', firstMember)
-  setXmlField(node, 'Designated Data Member', firstMember)
-
-  const memberRecset = node.querySelector('EmbeddedRecset[Name="Scan Member List"]')
-  const memberTemplate = memberRecset?.querySelector('EmbeddedNode')
-  if (memberRecset && memberTemplate) {
-    removeChildren(memberRecset)
-    scanList.members.forEach((channel) =>
-      memberRecset.appendChild(buildTemplateScanMember(doc, memberTemplate, channel)),
-    )
-  }
-
-  if (!scanList.alias) node.setAttribute('ReferenceKey', `RB2 Scan ${index}`)
-  return node
-}
-
-function buildTemplateScanMember(doc, templateNode, channel) {
-  const node = cloneInto(doc, templateNode)
-  node.setAttribute('ReferenceKey', scanMemberReference(channel))
-  setXmlField(node, 'Zone', channel.zoneReference)
-  setXmlField(node, 'Channel', `${channel.zonePosition}-${channel.channelName}`)
-  return node
-}
-
-function buildTemplateZone(doc, templateNode, zone) {
-  const node = cloneInto(doc, templateNode)
-  const zoneReference = `${zone.position}-${zone.name}`
-
-  node.setAttribute('ReferenceKey', zoneReference)
-  setXmlField(node, 'Zone Name', zone.name)
-  setXmlField(node, 'FPP Enable', 'False')
-
-  const channelRecset = node.querySelector('EmbeddedRecset[Name="Channel Assignment List"]')
-  const channelTemplate = channelRecset?.querySelector('EmbeddedNode')
-  if (channelRecset && channelTemplate) {
-    removeChildren(channelRecset)
-    zone.channels.forEach((channel) =>
-      channelRecset.appendChild(buildTemplateZoneChannel(doc, channelTemplate, channel)),
-    )
-  }
-
-  return node
-}
-
-function buildTemplateZoneChannel(doc, templateNode, channel) {
-  const node = cloneInto(doc, templateNode)
-  node.setAttribute('ReferenceKey', `${channel.zonePosition}-${channel.channelName}`)
-  setXmlField(node, 'Channel Type', 'Cnv')
-  setXmlField(node, 'Personality', 'RB2 Analog')
-  setXmlField(node, 'Conventional Frequency Option', channel.frequencyName)
-  setXmlField(node, 'Channel Name', channel.channelName)
-  setXmlField(node, 'Active Channel', 'True')
-  return node
-}
-
-function fallbackTemplateError(channels, skipped, message) {
-  return {
-    content: '',
-    channelCount: 0,
-    skippedCount: skipped,
-    message: `${message} APX CPS XML was not downloaded. ${channels.length} FM channel${channels.length === 1 ? '' : 's'} were ready for export.`,
-  }
-}
-
-function findNode(doc, recsetName, referenceKey) {
-  return [...doc.querySelectorAll(`Recset[Name="${recsetName}"] > Node`)].find(
-    (node) => node.getAttribute('ReferenceKey') === referenceKey,
-  )
-}
-
-function firstNode(doc, recsetName) {
-  return doc.querySelector(`Recset[Name="${recsetName}"] > Node`)
-}
-
-function setXmlField(node, name, value) {
-  const field = [...node.querySelectorAll('Field')].find(
-    (candidate) => candidate.getAttribute('Name') === name,
-  )
-  if (field) field.textContent = value
-}
-
-function cloneInto(doc, node) {
-  return doc.importNode(node, true)
-}
-
-function removeChildren(node) {
-  while (node.firstChild) node.removeChild(node.firstChild)
-}
-
-function appendTextElement(doc, parent, name, value) {
-  const element = doc.createElement(name)
-  element.textContent = value
-  parent.appendChild(element)
-}
-
-function toApxChannel(repeater, index) {
-  const channelName = sanitizeApxName(repeater.channelName || `RB2 ${index + 1}`)
-  const frequencyName = sanitizeApxName(
-    `${formatFrequency(repeater.rxFrequency)} ${repeater.callsign}`.trim(),
-  )
+function toApxChannel(repeater, index, channelType, needsSuffix, networkId = '') {
+  const rxDisplay = formatDisplayFrequency(repeater.rxFrequency)
+  const callsign = sanitizeApxName(repeater.callsign || `CH${index + 1}`, 8)
+  const frequencyName = sanitizeApxName(`${rxDisplay}-${callsign}`)
+  const baseChannelName = sanitizeApxName(`${callsign} ${rxDisplay}`)
+  const channelName =
+    needsSuffix && channelType === 'p25'
+      ? sanitizeApxName(`${baseChannelName.slice(0, 13)}P`)
+      : baseChannelName
 
   return {
-    position: index + 1,
     zoneName: sanitizeApxName(repeater.zone || 'RB2'),
     channelName,
+    topDisplayCallsign: callsign,
+    topDisplayFrequency: topDisplayName(rxDisplay),
     frequencyName: frequencyName || channelName,
     rxFrequency: formatFrequency(repeater.rxFrequency),
     txFrequency: formatFrequency(repeater.txFrequency || repeater.rxFrequency),
     txTone: repeater.tone,
     rxTone: repeater.rxTone || repeater.tone,
+    networkId,
+    channelType,
     spacing: repeater.bandwidth === 'Narrow' ? '2.5 kHz / 12.5 kHz' : '5 kHz / 25 kHz',
     talkaround: repeater.talkaround === 'Yes',
   }
 }
 
-function buildZones(channels) {
+function buildZones(channels, radioType) {
   const grouped = new Map()
+  const channelsPerZone =
+    radioType === 'portable' ? PORTABLE_CHANNELS_PER_ZONE : Infinity
 
   channels.forEach((channel) => {
     const baseZoneName = channel.zoneName || 'RB2'
@@ -322,12 +187,12 @@ function buildZones(channels) {
 
   const zones = []
   grouped.forEach((zoneChannels, baseZoneName) => {
-    for (let index = 0; index < zoneChannels.length; index += MAX_CHANNELS_PER_ZONE) {
-      const suffix = index === 0 ? '' : ` ${Math.floor(index / MAX_CHANNELS_PER_ZONE) + 1}`
+    for (let index = 0; index < zoneChannels.length; index += channelsPerZone) {
+      const suffix = index === 0 ? '' : ` ${Math.floor(index / channelsPerZone) + 1}`
       zones.push({
         position: zones.length + 1,
         name: sanitizeApxName(`${baseZoneName}${suffix}`),
-        channels: zoneChannels.slice(index, index + MAX_CHANNELS_PER_ZONE),
+        channels: zoneChannels.slice(index, index + channelsPerZone),
       })
       const zone = zones[zones.length - 1]
       zone.channels.forEach((channel, channelIndex) => {
@@ -340,12 +205,16 @@ function buildZones(channels) {
   return zones
 }
 
-function renderConventionalSystem() {
+function renderConventionalSystem(radioType, portableModel, hasP25Channel) {
+  const portable = radioType === 'portable'
+  const apx8000 = portable && portableModel === 'apx8000'
+  const p25 = hasP25Channel
+
   return [
     '    <Recset Name="Conventional System" Id="2053">',
     '      <Node Name="Conventional System" ReferenceKey="RB2 Cnv Sys">',
     '        <Section Name="General" id="10118">',
-    field('System Type', 'ASTRO'),
+    field('System Type', p25 ? 'ASTRO' : portable ? 'MDC' : 'ASTRO'),
     field('Data Profile Selection', '<Data Disabled>'),
     field('Repeater Access Pretime (ms)', '200'),
     field('PTT-ID', 'None'),
@@ -366,6 +235,7 @@ function renderConventionalSystem() {
     field('Expanded MDC ID Range', 'False'),
     field('MDC Primary ID (hex)', '1'),
     field('Variable ID (hex)', '0'),
+    ...(portable ? [field('Home WACN ID', '0'), field('System ID', '0')] : []),
     '        </Section>',
     '        <Section Name="Quik-Call II" id="10785" Embedded="True">',
     '          <EmbeddedRecset Name="Individual ID Tones" Id="0">',
@@ -377,6 +247,7 @@ function renderConventionalSystem() {
     field('Call Format', 'A-B'),
     field('QCII Decode', 'False'),
     '        </Section>',
+    ...(portable ? [renderPortableDvrsSection()] : []),
     '        <Section Name="Features" id="10119">',
     field('Select Call / In-Call Reset', 'Auto w/ Carr'),
     field('Data Operated Squelch Enable\\Data Operated Squelch (DOS)', 'True'),
@@ -393,26 +264,67 @@ function renderConventionalSystem() {
     field('Send Location to Peer/on PTT', 'False'),
     field('Status Request', 'False'),
     field('Remote Monitor/Radio Trace\\Tx Base Time (sec)', '10'),
-    field('Dynamic ID Enable', 'False'),
+    ...(apx8000 ? [] : [field('Dynamic ID Enable', 'False')]),
     field('Text Messaging Service', 'None'),
     field('POP25 Enable', 'False'),
+    ...(portable
+      ? [
+          field('Group Text Messaging Service', 'Disabled'),
+          field('Personnel Accountability List Selection', '<Disabled>'),
+        ]
+      : []),
     field('Qualify Emergency Alarm Rx', 'False'),
     '        </Section>',
+    ...(portable ? [renderPortableSystemSecureSection()] : []),
     '      </Node>',
     '    </Recset>',
   ].join('\r\n')
 }
 
-function renderConventionalPersonality(channels, scanListAlias) {
+function renderConventionalPersonalities(
+  channels,
+  personalityNames,
+  radioType,
+  portableModel,
+) {
+  const personalityTypes = ['analog', 'p25'].filter((channelType) =>
+    channels.some((channel) => channel.channelType === channelType),
+  )
+
   return [
     '    <Recset Name="Conventional Personality" Id="2059">',
-    '      <Node Name="Conventional Personality" ReferenceKey="RB2 Analog">',
+    ...personalityTypes.map((channelType) =>
+      renderConventionalPersonality(
+        channels.filter((channel) => channel.channelType === channelType),
+        personalityNames[channelType],
+        radioType,
+        portableModel,
+        channelType,
+      ),
+    ),
+    '    </Recset>',
+  ].join('\r\n')
+}
+
+function renderConventionalPersonality(
+  channels,
+  personalityName,
+  radioType,
+  portableModel,
+  channelType,
+) {
+  const portable = radioType === 'portable'
+  const apx8000 = portable && portableModel === 'apx8000'
+  const p25 = channelType === 'p25'
+
+  return [
+    `      <Node Name="Conventional Personality" ReferenceKey="${xml(personalityName)}">`,
     '        <Section Name="General" id="10150">',
-    field('Conventional Personality Name', 'RB2 Analog'),
+    field('Conventional Personality Name', personalityName),
     '        </Section>',
     '        <Section Name="Rx Options" id="10136">',
     field('Receive Only Personality', 'False'),
-    field('Rx Voice / Signal Type', 'Non-ASTRO'),
+    field('Rx Voice / Signal Type', p25 ? 'ASTRO' : 'Non-ASTRO'),
     field('Busy LED', 'True'),
     field('Rx Unmute Delay (ms)', '0'),
     field('Unmute / Mute Type', 'UnMute, Or Mute'),
@@ -422,7 +334,7 @@ function renderConventionalPersonality(channels, scanListAlias) {
     field('Concurrent Rx Enable', 'True'),
     '        </Section>',
     '        <Section Name="Tx Options" id="10137">',
-    field('Tx Voice / Signal Type', 'Non-ASTRO'),
+    field('Tx Voice / Signal Type', p25 ? 'ASTRO' : 'Non-ASTRO'),
     field('Transmit Power Level', 'High'),
     field('Reverse Burst / Turn-Off Code', 'True'),
     field('Adaptive Power', 'False'),
@@ -440,7 +352,7 @@ function renderConventionalPersonality(channels, scanListAlias) {
     field('Non-ASTRO\\System Number', 'RB2 Cnv Sys'),
     field('ASTRO\\Digital Modulator Type', 'C4FM'),
     field('Emergency Revert\\Revert Type', 'Selected Channel'),
-    field('ASTRO\\ASTRO System', '<None>'),
+    field('ASTRO\\ASTRO System', p25 ? 'RB2 Cnv Sys' : '<None>'),
     field('ASTRO\\Late Entry Fast Unmute', 'False'),
     field('Tone Signaling List', '<Tone Signaling Disabled>'),
     field('Non-ASTRO\\PTT ID', 'False'),
@@ -448,6 +360,13 @@ function renderConventionalPersonality(channels, scanListAlias) {
     field('Non-ASTRO\\Emergency PTT ID', 'False'),
     field('ASTRO\\ASTRO Rx Unmute Rule', 'Normal Squelch'),
     field('Emergency Revert\\Revert Channel', '<None>'),
+    ...(portable
+      ? [
+          field('Revert Talkgroup\\Revert Talkgroup', '1'),
+          field('Revert Talkgroup\\Revert TG Secure / Clear Strapping', 'Clear'),
+          field('Revert Talkgroup\\Revert TG Key Select', 'CIRC AES'),
+        ]
+      : []),
     '        </Section>',
     '        <Section Name="Non-ASTRO Call" id="10143">',
     field('Call Alert\\Call Alert Rx / Tx', 'Disabled'),
@@ -455,17 +374,25 @@ function renderConventionalPersonality(channels, scanListAlias) {
     field('MDC\\Auto Select Call Transmit', 'False'),
     field('Call Alert\\In-Call User Alert Enable', 'False'),
     field('Selective Call\\Unmute Type', 'And'),
-    field('MDC\\Unlimited Calling', 'False'),
+    ...(apx8000 ? [] : [field('MDC\\Unlimited Calling', 'False')]),
     field('MDC\\RTT Button Access', 'None'),
     field('Non-ASTRO Call Hot List', 'LIST 1'),
     '        </Section>',
     '        <Section Name="ASTRO Call" id="10141">',
     field('Call Alert\\Call Alert Rx / Tx', 'Disabled'),
     field('Selective Call\\Selective Call Rx / Tx', 'Disabled'),
+    ...(portable
+      ? [
+          field('Tactical Inhibit\\Kill Operation', 'Disabled'),
+          ...(apx8000
+            ? []
+            : [field('Tactical Inhibit\\Stun Operation', 'Disabled')]),
+        ]
+      : []),
     field('ASTRO Call Hot List', 'LIST 1'),
     field('Selective Call\\Auto Selective Call Transmit', 'False'),
     field('Call Alert\\In-Call User Alert Enable', 'False'),
-    field('ASTRO Unlimited Calling', 'False'),
+    ...(apx8000 ? [] : [field('ASTRO Unlimited Calling', 'False')]),
     '        </Section>',
     '        <Section Name="ASTRO Talkgroup" id="10147">',
     field('Talkgroup', 'False'),
@@ -485,19 +412,31 @@ function renderConventionalPersonality(channels, scanListAlias) {
     '        </Section>',
     '        <Section Name="Features" id="10135">',
     field('Smart PTT\\Smart PTT Type', 'Disabled'),
-    field('Scan\\Scan List Selection', scanListAlias),
+    ...(portable ? [field('Polite DVRS Inbound PTT Request', 'False')] : []),
+    field('Scan\\Scan List Selection', '<None>'),
     field('Tactical Rekey Enable', 'False'),
     field('Scan\\Automatic Scan', 'False'),
-    field('Hot Keypad', 'False'),
+    ...(apx8000 ? [] : [field('Hot Keypad', 'False')]),
     field('Smart PTT\\Quick Key Override', 'False'),
+    ...(portable && !apx8000
+      ? [field('OTACR / OTACS Messaging', 'False')]
+      : []),
     field('Scan\\Mixed Vote Scan Enable', 'False'),
     field('Scan\\Mixed Vote Scan Tx Steering', 'False'),
     field('Tactical Public Safety UI Enable', 'False'),
     field('End Tx on Voice Absence', 'False'),
     field('Incident Signaling Type', 'Disabled'),
+    ...(portable
+      ? [
+          field('Personnel Accountability\\Personnel Accountability Registration', 'False'),
+          field('Personnel Accountability\\Tx Voice Type', 'Digital'),
+        ]
+      : []),
     field('RF Modem', 'Disabled'),
+    ...(portable ? [field('OTA Radio Alias Type', 'Disabled')] : []),
     field('Conventional RSSI Display', 'False'),
     field('RSSI Display Timer (sec)', '15'),
+    ...(portable ? [field('OTA Radio Alias Update Enable', 'False')] : []),
     field('DTMF Mic Enable', 'False'),
     '        </Section>',
     '        <Section Name="Phone" id="10139">',
@@ -507,14 +446,14 @@ function renderConventionalPersonality(channels, scanListAlias) {
     '        </Section>',
     '        <Section Name="One Touch" id="10145" Embedded="True">',
     '          <EmbeddedRecset Name="Conventional One Touch" Id="0">',
-    renderOneTouchButton(1),
-    renderOneTouchButton(2),
-    renderOneTouchButton(3),
-    renderOneTouchButton(4),
+    renderOneTouchButton(1, radioType),
+    renderOneTouchButton(2, radioType),
+    renderOneTouchButton(3, radioType),
+    renderOneTouchButton(4, radioType),
     '          </EmbeddedRecset>',
     '        </Section>',
     '        <Section Name="Secure" id="10142">',
-    field('Secure Voice / Signal Type', 'ASTRO'),
+    field('Secure Voice / Signal Type', p25 ? 'ASTRO' : 'Securenet'),
     field('Packet Data\\Secure / Clear Strapping', 'Clear'),
     field('OTAR Tx', 'True'),
     field('Key ID', 'None'),
@@ -527,19 +466,60 @@ function renderConventionalPersonality(channels, scanListAlias) {
     field('Scan Select', 'Non-XL & XL'),
     field('ASTRO OTAR Profile Index', '<Disabled>'),
     field('DES-XL Tx Default', 'False'),
-    field('Voice\\Key Select', 'Sec Key 1'),
-    field('Packet Data\\Key Select', 'Sec Key 1'),
+    field('Voice\\Key Select', '<None>'),
+    field('Packet Data\\Key Select', '<None>'),
     field('Echo Mute Time (ms)', '0'),
     field('Packet Data\\Ignore Rx Clear Packet Data', 'False'),
     field('XL Delay Following Key ID', '50'),
     '        </Section>',
     '        <Section Name="Advanced" id="10140">',
-    field('Analog Flat Audio', 'False'),
+    ...(portable ? [] : [field('Analog Flat Audio', 'False')]),
     field('Advanced RF AGC', 'Disabled'),
-    field('Disable High Pass Filter', 'False'),
+    ...(portable ? [] : [field('Disable High Pass Filter', 'False')]),
     '        </Section>',
     '      </Node>',
-    '    </Recset>',
+  ].join('\r\n')
+}
+
+function renderPortableDvrsSection() {
+  return [
+    '        <Section Name="DVRS" id="10643">',
+    field('Emergency Blocked in Failsoft', 'False'),
+    field('Talk Permit Tone', 'True'),
+    field('Dynamic Regrouping\\Dynamic Regrouping Enable', 'False'),
+    field('Dynamic Regrouping\\Zone', '<None>'),
+    field('Dynamic Regrouping\\Channel', '<None>'),
+    field('TA After DVRS No Communication Attempts', 'Disabled'),
+    field('Out of DVRS Range Time (sec)', 'Disabled'),
+    field('Fast Retry Time (ms)', '750'),
+    field('Attachment Retries', '4'),
+    field('Timers\\Individual Call Max Target Ring Time (sec)', '61'),
+    field('Timers\\Private Call Max Initial Ring (sec)', '30'),
+    field('Timers\\Force Unmute Time (ms)', 'Immediate'),
+    field('Timers\\PTT Warning Time (ms)', '750'),
+    field('Timers\\Busy Update Time (sec)', '30'),
+    field('Timers\\Response Pending Time (sec)', '6'),
+    field('End Out of Range on Analog Rx', 'False'),
+    field('Bypass Quick Key Voice Channel Access', 'False'),
+    field('Call Type', 'Enhanced Private Call'),
+    field('Phase 2 System Compatibility', 'True'),
+    field('Prefer Talkaround in NoComms', 'False'),
+    field('DVR Sync NAC Matching', 'False'),
+    field('Talkaround Audio Mode', 'Phase 1 FDMA'),
+    '        </Section>',
+  ].join('\r\n')
+}
+
+function renderPortableSystemSecureSection() {
+  return [
+    '        <Section Name="Secure" id="10644">',
+    field('ASTRO OTAR Profile Index', '<Disabled>'),
+    field('Patch Key Select', 'CIRC AES'),
+    field('Private Call Key Select', 'CIRC AES'),
+    field('Interconnect Key Select', 'CIRC AES'),
+    field('Dynamic Talkgroup Key Select', 'CIRC AES'),
+    field('Failsoft Key Select', 'CIRC AES'),
+    '        </Section>',
   ].join('\r\n')
 }
 
@@ -554,13 +534,17 @@ function renderIndividualIdTone(frequency, code) {
   ].join('\r\n')
 }
 
-function renderOneTouchButton(index) {
+function renderOneTouchButton(index, radioType = 'mobile') {
+  const portable = radioType === 'portable'
+
   return [
     `            <EmbeddedNode Name="Conventional One Touch" ReferenceKey="Button ${index}">`,
     '              <EmbeddedSection Name="Conventional One Touch" id="10146">',
     field('Feature', 'Disabled', 16),
     field('Index', String(index), 16),
-    field('Abbreviated One Touch Alias', String(index), 16),
+    ...(portable
+      ? []
+      : [field('Abbreviated One Touch Alias', String(index), 16)]),
     '              </EmbeddedSection>',
     '            </EmbeddedNode>',
   ].join('\r\n')
@@ -569,6 +553,7 @@ function renderOneTouchButton(index) {
 function renderFrequencyOption(channel) {
   const txTone = toneFields('Tx', channel.txTone)
   const rxTone = toneFields('Rx / TA', channel.rxTone)
+  const networkId = channel.networkId || '659'
 
   return [
     `            <EmbeddedNode Name="Frequency Options" ReferenceKey="${xml(channel.frequencyName)}">`,
@@ -580,14 +565,14 @@ function renderFrequencyOption(channel) {
     field('Tx DPL Invert', 'False', 16),
     field('Rx / TA Squelch Type', rxTone.type, 16),
     field('Tx Frequency (MHz)', channel.txFrequency, 16),
-    field('Tx Network ID', '659', 16),
+    field('Tx Network ID', networkId, 16),
     field('Tx PL Code', txTone.plCode, 16),
     field('Tx PL Freq', txTone.plFreq, 16),
     field('Rx / TA  PL Code', rxTone.plCode, 16),
     field('Rx / TA PL Freq', rxTone.plFreq, 16),
     field('Rx / TA DPL Code', rxTone.dplCode, 16),
     field('Rx / TA DPL Invert', 'False', 16),
-    field('Rx / TA  Network ID', '659', 16),
+    field('Rx / TA  Network ID', networkId, 16),
     field('Direct / Talkaround', channel.talkaround ? 'True' : 'False', 16),
     field('Direct Squelch Type', 'Disabled', 16),
     field('Direct PL Freq', '67.0', 16),
@@ -595,7 +580,7 @@ function renderFrequencyOption(channel) {
     field('ASTRO Talkgroup ID', 'Talkgroup 1', 16),
     field('Tx Deviation / Channel Spacing', channel.spacing, 16),
     field('Name', channel.frequencyName, 16),
-    field('Direct Network ID', '659', 16),
+    field('Direct Network ID', networkId, 16),
     field('User Selectable PL [MPL]', 'Disabled', 16),
     field('Direct Frequency (MHz)', channel.rxFrequency, 16),
     field('Direct DPL Code', '023', 16),
@@ -606,79 +591,44 @@ function renderFrequencyOption(channel) {
   ].join('\r\n')
 }
 
-function renderScanLists(scanLists) {
-  const listXml = scanLists.map((scanList) => {
-    const firstMember = scanMemberReference(scanList.members[0], scanList.members[0]?.position || 1)
-    return [
-      `      <Node Name="Scan List" ReferenceKey="${xml(scanList.alias)}">`,
-      '        <Section Name="General" id="10131">',
-      field('Scan Type', 'Conventional'),
-    field('Designated Data Rx / Tx Type', 'None'),
-    field('Designated Voice Tx Member Type', 'Selected Channel'),
-    field('Priority Assignment\\Dynamic Priority', 'False'),
-    field('Trunking System\\Record', 'Trk Sys 1'),
-    field('Priority Assignment\\Priority 1 - Type', 'Disabled'),
-      field('Priority Assignment\\Priority 2 - Type', 'Disabled'),
-      field('Priority Assignment\\Priority Member 1', '<None>'),
-      field('Priority Assignment\\Priority Member 2', '<None>'),
-      field('Scan List Alias', scanList.alias),
-      field('Non-Priority Members', 'Fixed'),
-      field('Designated Voice Tx Member', firstMember),
-      field('Designated Data Member', firstMember),
-      '        </Section>',
-      '        <Section Name="Advanced" id="10130">',
-      field('Tx Steering', 'False'),
-      field('Display Strongest Voted Channel', 'True'),
-      field('Voting Scan Delay Timer', '0'),
-      field('Data Tx Limited Patience Timer (ms)', 'Infinite'),
-      field('Mixed Conventional Vote Scan Inactivity Timer (min)', '10'),
-      '        </Section>',
-      '        <Section Name="Scan List Members" id="10132" Embedded="True">',
-      '          <EmbeddedRecset Name="Scan Member List" Id="0">',
-      ...scanList.members.map((member) => renderScanMember(member)),
-      '          </EmbeddedRecset>',
-      '        </Section>',
-      '      </Node>',
-    ].join('\r\n')
-  })
-
-  return [
-    '    <Recset Name="Scan List" Id="2057">',
-    ...listXml,
-    '    </Recset>',
-  ].join('\r\n')
-}
-
-function renderScanMember(channel) {
-  const reference = scanMemberReference(channel)
-  return [
-    `            <EmbeddedNode Name="Scan Member List" ReferenceKey="${xml(reference)}">`,
-    '              <EmbeddedSection Name="Scan Member List" id="10133">',
-    field('Zone', channel.zoneReference, 16),
-    field('Channel', `${channel.zonePosition}-${channel.channelName}`, 16),
-    '              </EmbeddedSection>',
-    '            </EmbeddedNode>',
-  ].join('\r\n')
-}
-
-function renderZoneChannelAssignments(zones) {
+function renderZoneChannelAssignments(
+  zones,
+  radioType,
+  portableModel,
+  portableTopChannelName,
+) {
   const zoneXml = zones.map((zone) => {
     const zoneReference = `${zone.position}-${zone.name}`
+    const portable = radioType === 'portable'
+    const apx8000 = portable && portableModel === 'apx8000'
 
     return [
       `      <Node Name="Zone Channel Assignment" ReferenceKey="${xml(zoneReference)}">`,
       '        <Section Name="Zone" id="10116">',
       field('Zone Announcement', '<None>'),
+      ...(portable
+        ? [field('Voice Control Name / TTS Announcement ', '')]
+        : []),
       field('Zone Name', zone.name),
+      ...(portable ? [field('Top Display Zone', topDisplayName(zone.name))] : []),
       field('Dynamic Zone Enable', 'False'),
+      ...(apx8000 ? [field('Clone Enable', 'False')] : []),
       '        </Section>',
       '        <Section Name="FPP/Protection" id="10117">',
       field('Protected Zone', 'False'),
-      field('FPP Enable', 'False'),
+      ...(apx8000 ? [] : [field('FPP Enable', 'False')]),
       '        </Section>',
       '        <Section Name="Channels" id="10114" Embedded="True">',
       '          <EmbeddedRecset Name="Channel Assignment List" Id="0">',
-      ...zone.channels.map((channel, index) => renderZoneChannel(channel, index + 1)),
+      ...zone.channels.map((channel, index) =>
+        renderZoneChannel(
+          channel,
+          index + 1,
+          radioType,
+          portableModel,
+          portableTopChannelName,
+        ),
+      ),
       '          </EmbeddedRecset>',
       '        </Section>',
       '      </Node>',
@@ -692,24 +642,73 @@ function renderZoneChannelAssignments(zones) {
   ].join('\r\n')
 }
 
-function renderZoneChannel(channel, position) {
+function renderZoneChannel(
+  channel,
+  position,
+  radioType,
+  portableModel,
+  portableTopChannelName,
+) {
+  const portable = radioType === 'portable'
+  const apx8000 = portable && portableModel === 'apx8000'
+
   return [
     `            <EmbeddedNode Name="Channel Assignment List" ReferenceKey="${xml(`${position}-${channel.channelName}`)}">`,
     '              <EmbeddedSection Name="Channel Assignment List" id="10115">',
     field('Channel Type', 'Cnv', 16),
-    field('Personality', 'RB2 Analog', 16),
+    field('Personality', channel.personalityName, 16),
     field('Channel Announcement', '<None>', 16),
     field('Radio Profile Selection', '<Last Selected>', 16),
     field('Conventional Frequency Option', channel.frequencyName, 16),
     field('Channel Name', channel.channelName, 16),
+    ...(portable
+      ? [
+          field(
+            'Top Display Channel',
+            getPortableTopDisplayChannel(channel, portableTopChannelName),
+            16,
+          ),
+        ]
+      : []),
     field('Trunking Talkgroup', '', 16),
     field('Active Channel', 'True', 16),
-    field('Channel Color Backlight Selection ', 'Default', 16),
+    field(
+      portable
+        ? 'Channel Color Backlight Selection'
+        : 'Channel Color Backlight Selection ',
+      portable ? 'White' : 'Default',
+      16,
+    ),
+    ...(portable
+      ? [
+          field(
+            'Voice Control Name / TTS Announcement',
+            '',
+            16,
+          ),
+        ]
+      : []),
     field('Fallback Zone', '<Disabled>', 16),
     field('Fallback Channel', '<Disabled>', 16),
+    ...(apx8000 ? [field('Wi-Fi ', 'None', 16)] : []),
+    ...(portable
+      ? [field('Personnel Accountability Sector ID (hex)', '00', 16)]
+      : []),
     '              </EmbeddedSection>',
     '            </EmbeddedNode>',
   ].join('\r\n')
+}
+
+function topDisplayName(value) {
+  return sanitizeApxName(value, 8)
+}
+
+function getPortableTopDisplayChannel(channel, portableTopChannelName) {
+  if (portableTopChannelName === 'rxFrequency') {
+    return channel.topDisplayFrequency || topDisplayName(channel.rxFrequency)
+  }
+
+  return channel.topDisplayCallsign || topDisplayName(channel.channelName)
 }
 
 function toneFields(prefix, tone) {
@@ -738,6 +737,58 @@ function toneFields(prefix, tone) {
     plCode: PL_CODE_BY_FREQUENCY[cleanTone] || 'XZ',
     dplCode: '023',
   }
+}
+
+function getP25NetworkId(repeater) {
+  const rawValue = String(
+    repeater.digitalAccess ||
+      readSourceField(repeater.source, [
+        'Digital Access',
+        'NAC',
+        'P25 NAC',
+        'Network ID',
+      ]) ||
+      '',
+  )
+    .trim()
+    .toUpperCase()
+
+  if (!rawValue) return ''
+
+  const cleanValue = rawValue.replace(/^NAC\s*/i, '').replace(/[^0-9A-F]/g, '')
+  if (!cleanValue) return ''
+
+  const hexValue = Number.parseInt(cleanValue, 16)
+  if (Number.isFinite(hexValue) && hexValue >= 0 && hexValue <= 0xfff) {
+    return String(hexValue)
+  }
+
+  const decimalValue = Number.parseInt(cleanValue, 10)
+  if (Number.isFinite(decimalValue) && decimalValue >= 0 && decimalValue <= 4095) {
+    return String(decimalValue)
+  }
+
+  return ''
+}
+
+function readSourceField(source, aliases) {
+  if (!source) return ''
+
+  const normalizedMap = Object.entries(source).reduce((map, [key, value]) => {
+    map[normalizeKey(key)] = value
+    return map
+  }, {})
+
+  for (const alias of aliases) {
+    const value = normalizedMap[normalizeKey(alias)]
+    if (value) return String(value).trim()
+  }
+
+  return ''
+}
+
+function normalizeKey(value) {
+  return String(value).toLowerCase().replace(/[^a-z0-9]/g, '')
 }
 
 const PL_CODE_BY_FREQUENCY = {
@@ -785,15 +836,16 @@ const PL_CODE_BY_FREQUENCY = {
   '254.1': '0Z',
 }
 
-function scanMemberReference(channel) {
-  if (!channel) return ''
-  return `${channel.zonePosition}-(${channel.zoneReference || channel.zoneName})(${channel.zonePosition}-${channel.channelName})`
-}
-
 function formatFrequency(value) {
   const frequency = Number(value)
   if (!frequency) return '0.000000'
   return frequency.toFixed(6)
+}
+
+function formatDisplayFrequency(value) {
+  const frequency = Number(value)
+  if (!frequency) return '0.000'
+  return frequency.toFixed(3)
 }
 
 function field(name, value, indent = 10) {

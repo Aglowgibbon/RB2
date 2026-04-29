@@ -23,7 +23,7 @@ const FIELD_ALIASES = {
   mode: ['Mode', 'Modes', 'Use', 'FM Mode'],
   bandwidth: ['Bandwidth', 'Spacing'],
   notes: ['Notes', 'Comments', 'Operational Notes'],
-  digitalAccess: ['Digital Access', 'Color Code', 'CC', 'DCS'],
+  digitalAccess: ['Digital Access', 'NAC', 'P25 NAC', 'Network ID', 'Color Code', 'CC', 'DCS'],
   name: ['Channel Name', 'Name', 'Repeater Name'],
 }
 
@@ -46,6 +46,7 @@ export function normalizeRepeater(row, options = {}) {
   const rxTone = cleanTone(readField(row, FIELD_ALIASES.rxTone))
   const sourceModes = readField(row, FIELD_ALIASES.mode)
   const mode = normalizeMode(sourceModes)
+  const digitalAccess = readField(row, FIELD_ALIASES.digitalAccess)
   const notes = buildNotes(row, sourceModes, mode)
 
   return {
@@ -62,6 +63,7 @@ export function normalizeRepeater(row, options = {}) {
     power: 'High',
     talkaround: 'No',
     scanList: '',
+    digitalAccess,
     callsign,
     location,
     notes,
@@ -155,7 +157,7 @@ function normalizeMode(value) {
   const mode = String(value || '').trim().toUpperCase()
   if (mode.includes('D-STAR') || mode.includes('DSTAR')) return 'D-STAR'
   if (mode.includes('DMR')) return 'DMR'
-  if (mode.includes('P25')) return 'P25'
+  if (/P-?25/.test(mode)) return 'P25'
   if (mode.includes('NXDN')) return 'NXDN'
   if (mode.includes('FM')) return 'FM'
   if (mode.includes('FUSION') || mode.includes('WIRES-X')) return 'Fusion'

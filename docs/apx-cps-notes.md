@@ -41,13 +41,46 @@ The XML export currently creates:
 - One conventional system named `RB2 Cnv Sys`.
 - One analog conventional personality named `RB2 Analog`.
 - Frequency options for selected FM repeaters.
-- Zone channel assignments split into 16-channel zone chunks.
-- Conventional scan lists for the generated zone members.
+- Mobile zone channel assignments keep the selected RB2 zone together.
+- Portable zone channel assignments split into 16-channel chunks for the
+  selector knob positions.
 
-The XML export intentionally skips non-FM modes such as DMR, D-STAR, and Fusion.
-Those protocols are not converted into APX conventional personalities by RB2.
+APX XML export infers analog FM and P25 conventional channels from RepeaterBook
+mode data. If a row lists both FM and P25, RB2 exports separate APX channels for
+each mode. P25 conventional export maps `Digital Access` to the APX Network ID
+field as a NAC value when present.
+
+APX CPS stores P25 NAC in the XML as `Tx Network ID`, `Rx / TA  Network ID`, and
+`Direct Network ID`. RB2 reads NAC from the RepeaterBook CSV `Digital Access`
+field first. It accepts NAC values in the familiar hexadecimal form such as
+`293` and writes the decimal value CPS expects, such as `659`. If a RepeaterBook
+P25 row has no valid `Digital Access` value, RB2 skips that P25 channel instead
+of generating a NAC value.
+
+Select the APX target radio bands before exporting. No APX bands are selected
+by default. RB2 filters out channels whose RX or TX frequency is outside the
+selected APX bands. Current band filters are VHF, UHF 1, UHF 2, 700/800 MHz,
+and 900 MHz.
+
+Select APX Mobile or APX Portable before exporting. Portable zone/channel
+assignment records include top-display, color backlight, and personnel
+accountability fields that are not present in the mobile export shape. RB2 sets
+portable zone and channel announcements to `<None>` and leaves TTS names blank
+because TTS options are not available on every radio/codeplug. For portable
+exports, select SRX 2200 or APX 8000. The APX 8000 export shape adds fields such
+as `Clone Enable` and `Wi-Fi ` and omits a few fields present in the SRX 2200
+sample.
+
+Portable exports also include a top display channel option. RB2 can set `Top
+Display Channel` to either the repeater callsign or the first eight characters
+of the receive frequency.
+
+RB2 does not generate APX scan lists yet. CPS scan-list members reference the
+actual zone channel assignment number after import, so scan-list creation will be
+handled as a later APX-specific workflow. Until then, APX personalities export
+with scan list selection set to `<None>`.
 
 RB2 includes a built-in APX conventional analog XML template, so users do not
 need to upload a CPS XML file before exporting APX CPS XML. The generated file
-uses complete conventional system, personality, scan-list, and zone/channel
-assignment structures, with repeater-specific values filled in from the CSV.
+uses complete conventional system, personality, and zone/channel assignment
+structures, with repeater-specific values filled in from the CSV.
