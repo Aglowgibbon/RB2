@@ -1,4 +1,5 @@
 import { toCsv } from '../../core/csvUtils.js'
+import { getDisplayChannelName } from '../../core/channelNames.js'
 import { appendApxNameNotes, sanitizeApxName } from './apxConstraints.js'
 
 const APX_HEADERS = [
@@ -19,7 +20,7 @@ const APX_HEADERS = [
 export function exportApxCsv(repeaters) {
   const rows = repeaters.map((repeater) => {
     const zoneName = sanitizeApxName(repeater.zone)
-    const channelName = sanitizeApxName(repeater.channelName)
+    const channelName = sanitizeApxName(getDisplayChannelName(repeater))
 
     return {
       Zone: zoneName,

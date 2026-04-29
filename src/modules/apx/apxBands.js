@@ -12,18 +12,6 @@ export const APX_BANDS = [
     maxMhz: 470,
   },
   {
-    id: 'uhf2',
-    label: 'UHF 2',
-    minMhz: 450,
-    maxMhz: 520,
-  },
-  {
-    id: '700800',
-    label: '700/800 MHz',
-    minMhz: 764,
-    maxMhz: 870,
-  },
-  {
     id: '900',
     label: '900 MHz',
     minMhz: 896,

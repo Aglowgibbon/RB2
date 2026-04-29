@@ -10,15 +10,26 @@ credentials.
 
 - Upload one or more RepeaterBook-style CSV files.
 - Parse conventional amateur repeater records.
-- Move through a step-by-step workflow: Import, Repeaters, Zones, Export.
+- Move through a step-by-step workflow: Import, Radio, Repeaters, Zones,
+  Export.
+- Choose the radio/export module and APX settings before reviewing repeater
+  data.
+- Select at least one target APX band before continuing from the Radio step.
 - Display repeaters in a review table after import.
 - Select or deselect repeaters.
-- Edit channel display names by default.
-- Enable edit mode to correct imported RX/TX frequency, tone, mode, callsign,
-  location, or P25 NAC data before export.
+- Show only repeaters matching the selected target APX bands when bands are
+  selected in the Radio step.
+- Show the default channel name that will be exported.
+- Enable channel-name edit mode to customize exported channel names.
+- Enable imported-data edit mode to correct RX/TX frequency, tone, mode,
+  callsign, location, or P25 NAC data before export.
 - Create, rename, delete, and organize zones in the Zone Organizer.
+- Keep zone names within APX-safe Motorola mobile/portable character limits.
 - Keep unassigned channels in a left-side intake column and drag channel cards
   into zone columns before export.
+- Move all unassigned channels into a zone in one action.
+- Reorder zones and reorder channel positions inside a zone; this order is used
+  for zone channel assignment position during export.
 - Organize selected channels automatically by state, county, city, amateur band,
   or mode.
 - Export selected repeaters as Generic CSV.
@@ -39,11 +50,12 @@ APX channels.
 
 For APX exports, choose the target radio bands before exporting. No APX bands
 are selected by default. RB2 currently
-supports VHF, UHF 1, UHF 2, 700/800 MHz, and 900 MHz filtering.
+supports VHF, UHF 1, and 900 MHz filtering for amateur-radio APX workflows.
 Choose APX Mobile or APX Portable so RB2 writes the matching zone/channel
 assignment fields. Mobile exports keep a selected RB2 zone together, while
 portable exports split zone channel assignments into 16-channel chunks for the
-selector knob positions.
+selector knob positions. The Zone Organizer warns when a zone has more than 16
+channels because portable exports will split it into multiple CPS zones.
 For portable APX exports, choose SRX 2200 or APX 8000 so RB2 can account for
 known portable XML field differences. Portable exports leave TTS announcements
 disabled because TTS is not available on every radio/codeplug. Portable exports

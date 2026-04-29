@@ -1,4 +1,5 @@
 import { toCsv } from '../../core/csvUtils.js'
+import { getDisplayChannelName } from '../../core/channelNames.js'
 
 const GENERIC_HEADERS = [
   'Zone',
@@ -15,7 +16,7 @@ const GENERIC_HEADERS = [
 export function exportGenericCsv(repeaters) {
   const rows = repeaters.map((repeater) => ({
     Zone: repeater.zone,
-    'Channel Name': repeater.channelName,
+    'Channel Name': getDisplayChannelName(repeater),
     'RX Frequency': repeater.rxFrequency,
     'TX Frequency': repeater.txFrequency,
     Tone: repeater.tone,

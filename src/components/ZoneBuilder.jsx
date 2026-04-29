@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react'
+import { getDisplayChannelName } from '../core/channelNames'
 import { APX_NAME_MAX_LENGTH } from '../modules/apx/apxConstraints'
 
 function ZoneBuilder({
@@ -9,6 +10,10 @@ function ZoneBuilder({
   onAutoAssignZones,
   onCreateZone,
   onMoveRepeaterToZone,
+  onMoveRepeaterToPosition,
+  onMoveAllUnassignedToZone,
+  onMoveRepeaterWithinZone,
+  onMoveZone,
   onRenameZone,
   onDeleteZone,
   onClearZones,
@@ -17,6 +22,7 @@ function ZoneBuilder({
   const [draggingId, setDraggingId] = useState('')
   const [editingZone, setEditingZone] = useState('')
   const [editingZoneName, setEditingZoneName] = useState('')
+  const visibleIds = repeaters.map((repeater) => repeater.id)
 
   const repeatersByZone = useMemo(() => {
     const grouped = new Map(zones.map((zone) => [zone, []]))
@@ -36,11 +42,26 @@ function ZoneBuilder({
     setZoneName('')
   }
 
+  function handleMoveUnassigned(event) {
+    event.preventDefault()
+    onMoveAllUnassignedToZone(zoneName, visibleIds)
+    setZoneName('')
+  }
+
   function handleDrop(event, zoneName) {
     event.preventDefault()
     const repeaterId = event.dataTransfer.getData('text/plain') || draggingId
     if (!repeaterId) return
     onMoveRepeaterToZone(repeaterId, zoneName)
+    setDraggingId('')
+  }
+
+  function handleCardDrop(event, zoneName, targetRepeaterId) {
+    event.preventDefault()
+    event.stopPropagation()
+    const repeaterId = event.dataTransfer.getData('text/plain') || draggingId
+    if (!repeaterId) return
+    onMoveRepeaterToPosition(repeaterId, targetRepeaterId, zoneName)
     setDraggingId('')
   }
 
@@ -94,8 +115,9 @@ function ZoneBuilder({
     cancelRenameZone()
   }
 
-  function renderZoneColumn(zone) {
+  function renderZoneColumn(zone, zoneIndex = 0, zoneCount = 1) {
     const zoneRepeaters = repeatersByZone.get(zone) || []
+    const unassignedCount = (repeatersByZone.get('Unassigned') || []).length
     const canDeleteZone = zone !== 'Unassigned'
     const canRenameZone = zone !== 'Unassigned'
     const isRenamingZone = editingZone === zone
@@ -142,6 +164,35 @@ function ZoneBuilder({
           )}
           <div className="zone-column-controls">
             <span>{zoneRepeaters.length}</span>
+            {zoneRepeaters.length > 16 && zone !== 'Unassigned' ? (
+              <span className="zone-warning" title="Portable exports split zones every 16 channels">
+                16+
+              </span>
+            ) : null}
+            {canRenameZone && !isRenamingZone ? (
+              <>
+                <button
+                  className="zone-order-button"
+                  type="button"
+                  aria-label={`Move ${zone} zone left`}
+                  title="Move zone earlier"
+                  disabled={zoneIndex === 0}
+                  onClick={() => onMoveZone(zone, 'left')}
+                >
+                  &lt;
+                </button>
+                <button
+                  className="zone-order-button"
+                  type="button"
+                  aria-label={`Move ${zone} zone right`}
+                  title="Move zone later"
+                  disabled={zoneIndex >= zoneCount - 1}
+                  onClick={() => onMoveZone(zone, 'right')}
+                >
+                  &gt;
+                </button>
+              </>
+            ) : null}
             {canRenameZone && !isRenamingZone ? (
               <button
                 className="zone-edit-button"
@@ -151,6 +202,15 @@ function ZoneBuilder({
                 onClick={() => startRenameZone(zone)}
               >
                 Edit
+              </button>
+            ) : null}
+            {canRenameZone && !isRenamingZone && unassignedCount > 0 ? (
+              <button
+                className="zone-edit-button"
+                type="button"
+                onClick={() => onMoveAllUnassignedToZone(zone, visibleIds)}
+              >
+                Move here
               </button>
             ) : null}
             {canDeleteZone && !isRenamingZone ? (
@@ -166,30 +226,64 @@ function ZoneBuilder({
             ) : null}
           </div>
         </div>
+        {zoneRepeaters.length > 16 && zone !== 'Unassigned' ? (
+          <p className="zone-split-note">
+            Portable exports split this into {Math.ceil(zoneRepeaters.length / 16)} zones.
+          </p>
+        ) : null}
 
         <div className="zone-card-list">
           {zoneRepeaters.length === 0 ? (
             <p className="zone-empty">Drop channels here.</p>
           ) : (
-            zoneRepeaters.map((repeater) => (
+            zoneRepeaters.map((repeater, channelIndex) => (
               <article
                 key={repeater.id}
                 className={
-                  repeater.selected
-                    ? 'zone-channel-card'
-                    : 'zone-channel-card unselected'
+                  [
+                    repeater.selected
+                      ? 'zone-channel-card'
+                      : 'zone-channel-card unselected',
+                    draggingId === repeater.id ? 'dragging' : '',
+                  ]
+                    .filter(Boolean)
+                    .join(' ')
                 }
                 draggable
+                onDragOver={(event) => event.preventDefault()}
                 onDragStart={(event) => {
                   setDraggingId(repeater.id)
                   event.dataTransfer.setData('text/plain', repeater.id)
+                  event.dataTransfer.effectAllowed = 'move'
                 }}
+                onDrop={(event) => handleCardDrop(event, zone, repeater.id)}
                 onDragEnd={() => setDraggingId('')}
               >
-                <strong>{repeater.channelName}</strong>
+                <div className="zone-channel-heading">
+                  <span className="zone-channel-position">{channelIndex + 1}</span>
+                  <strong>{getDisplayChannelName(repeater)}</strong>
+                </div>
                 <span>
                   {repeater.rxFrequency || 'No RX'} | {repeater.mode}
                 </span>
+                <div className="zone-channel-actions">
+                  <button
+                    className="zone-order-button"
+                    type="button"
+                    disabled={channelIndex === 0}
+                    onClick={() => onMoveRepeaterWithinZone(repeater.id, 'up')}
+                  >
+                    Up
+                  </button>
+                  <button
+                    className="zone-order-button"
+                    type="button"
+                    disabled={channelIndex >= zoneRepeaters.length - 1}
+                    onClick={() => onMoveRepeaterWithinZone(repeater.id, 'down')}
+                  >
+                    Down
+                  </button>
+                </div>
               </article>
             ))
           )}
@@ -206,7 +300,7 @@ function ZoneBuilder({
       <div className="panel-heading">
         <div>
           <h2 id="zones-title">Zone Organizer</h2>
-          <p>Create zones, use quick grouping, or drag channels from Unassigned into zone columns.</p>
+          <p>Create zones, use quick grouping, or drag channels from Unassigned into zone columns. Zone names are limited to {APX_NAME_MAX_LENGTH} APX-safe characters.</p>
         </div>
 
         <div className="zone-tools">
@@ -214,7 +308,7 @@ function ZoneBuilder({
             <input
               list="known-zones"
               maxLength={APX_NAME_MAX_LENGTH}
-              placeholder="Zone name"
+              placeholder={`Zone name (${APX_NAME_MAX_LENGTH} max)`}
               value={zoneName}
               onChange={(event) => setZoneName(event.target.value)}
             />
@@ -229,6 +323,17 @@ function ZoneBuilder({
             >
               New zone
             </button>
+            <button
+              className="secondary-button"
+              type="button"
+              disabled={
+                !zoneName.trim() ||
+                !(repeatersByZone.get(unassignedZone) || []).length
+              }
+              onClick={handleMoveUnassigned}
+            >
+              Move unassigned
+            </button>
           </form>
 
           <div className="zone-actions" aria-label="Automatic zone organization">
@@ -236,7 +341,7 @@ function ZoneBuilder({
               className="secondary-button"
               type="button"
               disabled={selectedCount === 0}
-              onClick={() => onAutoAssignZones('state')}
+              onClick={() => onAutoAssignZones('state', visibleIds)}
             >
               State
             </button>
@@ -244,7 +349,7 @@ function ZoneBuilder({
               className="secondary-button"
               type="button"
               disabled={selectedCount === 0}
-              onClick={() => onAutoAssignZones('county')}
+              onClick={() => onAutoAssignZones('county', visibleIds)}
             >
               County
             </button>
@@ -252,7 +357,7 @@ function ZoneBuilder({
               className="secondary-button"
               type="button"
               disabled={selectedCount === 0}
-              onClick={() => onAutoAssignZones('city')}
+              onClick={() => onAutoAssignZones('city', visibleIds)}
             >
               City
             </button>
@@ -260,7 +365,7 @@ function ZoneBuilder({
               className="secondary-button"
               type="button"
               disabled={selectedCount === 0}
-              onClick={() => onAutoAssignZones('band')}
+              onClick={() => onAutoAssignZones('band', visibleIds)}
             >
               Band
             </button>
@@ -268,7 +373,7 @@ function ZoneBuilder({
               className="secondary-button"
               type="button"
               disabled={selectedCount === 0}
-              onClick={() => onAutoAssignZones('mode')}
+              onClick={() => onAutoAssignZones('mode', visibleIds)}
             >
               Mode
             </button>
@@ -276,7 +381,7 @@ function ZoneBuilder({
               className="secondary-button"
               type="button"
               disabled={selectedCount === 0}
-              onClick={onClearZones}
+              onClick={() => onClearZones(visibleIds)}
             >
               Clear selected
             </button>
@@ -309,7 +414,9 @@ function ZoneBuilder({
               <p className="zone-empty">Create a zone or use quick grouping.</p>
             </section>
           ) : (
-            orderedZones.map((zone) => renderZoneColumn(zone))
+            orderedZones.map((zone, index) =>
+              renderZoneColumn(zone, index, orderedZones.length),
+            )
           )}
         </div>
       </div>

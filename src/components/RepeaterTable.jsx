@@ -1,10 +1,18 @@
 import { APX_NAME_MAX_LENGTH } from '../modules/apx/apxConstraints'
+import { getDisplayChannelName } from '../core/channelNames'
 import { useState } from 'react'
 
-function RepeaterTable({ repeaters, onUpdateRepeater, onSelectAll }) {
+function RepeaterTable({
+  repeaters,
+  totalRepeaters,
+  onUpdateRepeater,
+  onSelectAll,
+}) {
+  const [channelNameEditMode, setChannelNameEditMode] = useState(false)
   const [editMode, setEditMode] = useState(false)
   const allSelected =
     repeaters.length > 0 && repeaters.every((repeater) => repeater.selected)
+  const hiddenCount = Math.max(0, totalRepeaters - repeaters.length)
 
   function updateMode(repeater, mode) {
     onUpdateRepeater(repeater.id, {
@@ -38,12 +46,26 @@ function RepeaterTable({ repeaters, onUpdateRepeater, onSelectAll }) {
       <div className="panel-heading">
         <div>
           <h2 id="repeaters-title">Repeaters</h2>
-          <p>Channel names stay editable. Turn on edit mode to correct imported frequency, tone, mode, or NAC data.</p>
+          <p>Channel names show the default export value. Customize a name only when you want to override it.</p>
+          {hiddenCount > 0 ? (
+            <p className="constraint-note">
+              {hiddenCount} repeater{hiddenCount === 1 ? '' : 's'} hidden by
+              target band selection.
+            </p>
+          ) : null}
           <p className="constraint-note">
             APX display fields are limited to {APX_NAME_MAX_LENGTH} characters.
           </p>
         </div>
         <div className="table-actions">
+          <button
+            className={channelNameEditMode ? 'primary-button' : 'secondary-button'}
+            type="button"
+            onClick={() => setChannelNameEditMode((current) => !current)}
+            disabled={repeaters.length === 0}
+          >
+            {channelNameEditMode ? 'Editing names on' : 'Edit channel names'}
+          </button>
           <button
             className={editMode ? 'primary-button' : 'secondary-button'}
             type="button"
@@ -55,7 +77,12 @@ function RepeaterTable({ repeaters, onUpdateRepeater, onSelectAll }) {
           <button
             className="secondary-button"
             type="button"
-            onClick={() => onSelectAll(!allSelected)}
+            onClick={() =>
+              onSelectAll(
+                !allSelected,
+                repeaters.map((repeater) => repeater.id),
+              )
+            }
             disabled={repeaters.length === 0}
           >
             {allSelected ? 'Deselect all' : 'Select all'}
@@ -102,16 +129,45 @@ function RepeaterTable({ repeaters, onUpdateRepeater, onSelectAll }) {
                     />
                   </td>
                   <td>
-                    <input
-                      className="table-input"
-                      maxLength={APX_NAME_MAX_LENGTH}
-                      value={repeater.channelName}
-                      onChange={(event) =>
-                        onUpdateRepeater(repeater.id, {
-                          channelName: event.target.value,
-                        })
-                      }
-                    />
+                    {channelNameEditMode ? (
+                      <div className="channel-name-editor">
+                        <input
+                          className="table-input"
+                          maxLength={APX_NAME_MAX_LENGTH}
+                          value={repeater.channelName}
+                          onChange={(event) =>
+                            onUpdateRepeater(repeater.id, {
+                              channelName: event.target.value,
+                              channelNameCustom: true,
+                            })
+                          }
+                        />
+                        <button
+                          className="secondary-button compact-button"
+                          type="button"
+                          onClick={() =>
+                            onUpdateRepeater(repeater.id, {
+                              channelName: getDisplayChannelName({
+                                ...repeater,
+                                channelNameCustom: false,
+                              }),
+                              channelNameCustom: false,
+                            })
+                          }
+                        >
+                          Default
+                        </button>
+                      </div>
+                    ) : repeater.channelNameCustom ? (
+                      <div className="channel-name-display">
+                        <span>{getDisplayChannelName(repeater)}</span>
+                        <span className="custom-badge">Custom</span>
+                      </div>
+                    ) : (
+                      <div className="channel-name-display">
+                        <span>{getDisplayChannelName(repeater)}</span>
+                      </div>
+                    )}
                   </td>
                   <td>{renderCellInput(repeater, 'rxFrequency', { compact: true })}</td>
                   <td>{renderCellInput(repeater, 'txFrequency', { compact: true })}</td>

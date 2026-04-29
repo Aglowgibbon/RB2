@@ -1,3 +1,5 @@
+import { buildDefaultChannelName } from './channelNames.js'
+
 const FIELD_ALIASES = {
   callsign: ['Callsign', 'Call Sign', 'Call', 'Input Call', 'Output Call'],
   location: ['Location', 'Nearest City', 'City', 'County', 'Landmark'],
@@ -24,10 +26,7 @@ const FIELD_ALIASES = {
   bandwidth: ['Bandwidth', 'Spacing'],
   notes: ['Notes', 'Comments', 'Operational Notes'],
   digitalAccess: ['Digital Access', 'NAC', 'P25 NAC', 'Network ID', 'Color Code', 'CC', 'DCS'],
-  name: ['Channel Name', 'Name', 'Repeater Name'],
 }
-
-const DISPLAY_NAME_MAX_LENGTH = 14
 
 export function normalizeRepeater(row, options = {}) {
   const rxFrequency = cleanFrequency(readField(row, FIELD_ALIASES.frequency))
@@ -53,7 +52,8 @@ export function normalizeRepeater(row, options = {}) {
     id: stableId(row, options.fallbackId),
     selected: true,
     zone: options.defaultZone || 'Unassigned',
-    channelName: buildChannelName(row, callsign, rxFrequency),
+    channelName: buildDefaultChannelName({ callsign, rxFrequency }),
+    channelNameCustom: false,
     rxFrequency,
     txFrequency,
     tone,
@@ -83,15 +83,6 @@ function readField(row, aliases) {
   }
 
   return ''
-}
-
-function buildChannelName(row, callsign, rxFrequency) {
-  const explicitName = readField(row, FIELD_ALIASES.name)
-  const sourceLocation = readField(row, FIELD_ALIASES.location)
-  const rawName =
-    explicitName ||
-    [callsign, rxFrequency, sourceLocation].filter(Boolean).join(' ')
-  return rawName.slice(0, DISPLAY_NAME_MAX_LENGTH).trim() || 'Repeater'
 }
 
 function stableId(row, fallbackId = 'repeater') {

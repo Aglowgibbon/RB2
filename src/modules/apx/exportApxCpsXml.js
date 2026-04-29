@@ -1,3 +1,4 @@
+import { getDisplayChannelName } from '../../core/channelNames.js'
 import { sanitizeApxName } from './apxConstraints.js'
 import { repeaterMatchesApxBands } from './apxBands.js'
 
@@ -180,7 +181,7 @@ function toApxChannel(
   const rxDisplay = formatDisplayFrequency(repeater.rxFrequency)
   const callsign = sanitizeApxName(repeater.callsign || `CH${index + 1}`, 8)
   const frequencyName = sanitizeApxName(`${rxDisplay}-${callsign}`)
-  const baseChannelName = sanitizeApxName(`${callsign} ${rxDisplay}`)
+  const baseChannelName = sanitizeApxName(getDisplayChannelName(repeater))
   const channelName =
     needsSuffix && channelType === 'p25'
       ? sanitizeApxName(`${baseChannelName.slice(0, 13)}P`)

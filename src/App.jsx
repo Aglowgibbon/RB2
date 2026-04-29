@@ -1,10 +1,14 @@
 import { useMemo, useState } from 'react'
 import { parseCsv } from './core/csvUtils'
+import { getDisplayChannelName } from './core/channelNames'
 import { normalizeRepeater } from './core/normalizeRepeater'
+import { APX_NAME_MAX_LENGTH, sanitizeApxName } from './modules/apx/apxConstraints'
 import { exportApxCsv } from './modules/apx/exportApxCsv'
+import { repeaterMatchesApxBands } from './modules/apx/apxBands'
 import { exportApxCpsXml } from './modules/apx/exportApxCpsXml'
 import { exportGenericCsv } from './modules/generic/exportGenericCsv'
 import ImportPanel from './components/ImportPanel'
+import RadioPanel from './components/RadioPanel'
 import RepeaterTable from './components/RepeaterTable'
 import ZoneBuilder from './components/ZoneBuilder'
 import ExportPanel from './components/ExportPanel'
@@ -12,9 +16,9 @@ import rb2Logo from './assets/rb2-logo.png'
 import './styles.css'
 
 const DEFAULT_ZONE = 'Unassigned'
-const ZONE_NAME_MAX_LENGTH = 14
 const WORKFLOW_STEPS = [
   { id: 'import', label: 'Import' },
+  { id: 'radio', label: 'Radio' },
   { id: 'repeaters', label: 'Repeaters' },
   { id: 'zones', label: 'Zones' },
   { id: 'export', label: 'Export' },
@@ -34,7 +38,7 @@ function downloadCsv(filename, csvText) {
 
 function App() {
   const [repeaters, setRepeaters] = useState([])
-  const [customZones, setCustomZones] = useState([])
+  const [zoneOrder, setZoneOrder] = useState([DEFAULT_ZONE])
   const [importName, setImportName] = useState('')
   const [message, setMessage] = useState('Import a RepeaterBook CSV to begin.')
   const [activeStep, setActiveStep] = useState('import')
@@ -47,24 +51,38 @@ function App() {
     portableTopChannelName: 'callsign',
     enabledBands: [],
   })
-
-  const selectedRepeaters = useMemo(
-    () => repeaters.filter((repeater) => repeater.selected),
-    [repeaters],
+  const bandFilteredRepeaters = useMemo(
+    () =>
+      getBandFilteredRepeaters(repeaters, exportModule, apxOptions.enabledBands),
+    [apxOptions.enabledBands, exportModule, repeaters],
   )
 
   const zones = useMemo(() => {
     const zoneSet = new Set(
-      repeaters.map((repeater) => repeater.zone).filter(Boolean),
+      bandFilteredRepeaters.map((repeater) => repeater.zone).filter(Boolean),
     )
-    customZones.forEach((zone) => zoneSet.add(zone))
-    return [...zoneSet].sort((a, b) => a.localeCompare(b))
-  }, [customZones, repeaters])
+    zoneOrder.forEach((zone) => zoneSet.add(zone))
+    const orderedZones = zoneOrder.filter((zone) => zoneSet.has(zone))
+    const unorderedZones = [...zoneSet].filter((zone) => !zoneOrder.includes(zone))
+    return [...orderedZones, ...unorderedZones]
+  }, [bandFilteredRepeaters, zoneOrder])
+
+  const selectedRepeaters = useMemo(
+    () =>
+      zones.flatMap((zone) =>
+        bandFilteredRepeaters.filter(
+          (repeater) =>
+            repeater.selected &&
+            (repeater.zone || DEFAULT_ZONE) === zone,
+        ),
+      ),
+    [bandFilteredRepeaters, zones],
+  )
 
   const zoneSummaries = useMemo(() => {
     const summaries = new Map()
 
-    repeaters.forEach((repeater) => {
+    bandFilteredRepeaters.forEach((repeater) => {
       const zone = repeater.zone || DEFAULT_ZONE
       const current = summaries.get(zone) || { name: zone, total: 0, selected: 0 }
       current.total += 1
@@ -72,19 +90,21 @@ function App() {
       summaries.set(zone, current)
     })
 
-    customZones.forEach((zone) => {
+    zoneOrder.forEach((zone) => {
       if (!summaries.has(zone)) {
         summaries.set(zone, { name: zone, total: 0, selected: 0 })
       }
     })
 
-    return [...summaries.values()].sort((a, b) => a.name.localeCompare(b.name))
-  }, [customZones, repeaters])
+    return zones
+      .map((zone) => summaries.get(zone))
+      .filter(Boolean)
+  }, [bandFilteredRepeaters, zoneOrder, zones])
 
   function handleFilesLoaded(files, readError) {
     if (readError) {
       setRepeaters([])
-      setCustomZones([])
+      setZoneOrder([DEFAULT_ZONE])
       setImportName('')
       setMessage(readError.message)
       setActiveStep('import')
@@ -106,15 +126,15 @@ function App() {
         fileCount === 1 ? files[0].name : `rb2-${fileCount}-csv-files`
 
       setRepeaters(normalized)
-      setCustomZones([])
+      setZoneOrder([DEFAULT_ZONE])
       setImportName(importLabel)
       setMessage(
         `Loaded ${normalized.length} repeater record${normalized.length === 1 ? '' : 's'} from ${fileCount} CSV file${fileCount === 1 ? '' : 's'}.`,
       )
-      if (normalized.length > 0) setActiveStep('repeaters')
+      if (normalized.length > 0) setActiveStep('radio')
     } catch (error) {
       setRepeaters([])
-      setCustomZones([])
+      setZoneOrder([DEFAULT_ZONE])
       setImportName('')
       setMessage(error.message)
       setActiveStep('import')
@@ -124,42 +144,97 @@ function App() {
   function updateRepeater(id, updates) {
     setRepeaters((current) =>
       current.map((repeater) =>
-        repeater.id === id ? { ...repeater, ...updates } : repeater,
+        repeater.id === id ? applyRepeaterUpdates(repeater, updates) : repeater,
       ),
     )
   }
 
-  function setAllSelected(selected) {
-    setRepeaters((current) =>
-      current.map((repeater) => ({ ...repeater, selected })),
-    )
-  }
-
-  function autoAssignSelectedZones(strategy) {
+  function setAllSelected(selected, visibleIds = null) {
+    const visibleSet = visibleIds ? new Set(visibleIds) : null
     setRepeaters((current) =>
       current.map((repeater) =>
-        repeater.selected
-          ? { ...repeater, zone: buildZoneName(repeater, strategy) }
+        !visibleSet || visibleSet.has(repeater.id)
+          ? { ...repeater, selected }
           : repeater,
       ),
     )
+  }
+
+  function addZonesToOrder(zoneNames) {
+    setZoneOrder((current) => {
+      const next = [...current]
+      zoneNames.forEach((zoneName) => {
+        const cleanZone = truncateZoneName(zoneName)
+        if (
+          cleanZone &&
+          !next.some((zone) => zone.toLowerCase() === cleanZone.toLowerCase())
+        ) {
+          next.push(cleanZone)
+        }
+      })
+      return next
+    })
+  }
+
+  function autoAssignSelectedZones(strategy, visibleIds = null) {
+    const visibleSet = visibleIds ? new Set(visibleIds) : null
+    setRepeaters((current) => {
+      const next = current.map((repeater) =>
+        repeater.selected && (!visibleSet || visibleSet.has(repeater.id))
+          ? { ...repeater, zone: buildZoneName(repeater, strategy) }
+          : repeater,
+      )
+      addZonesToOrder(next.map((repeater) => repeater.zone))
+      return next
+    })
   }
 
   function addCustomZone(zoneName) {
     const cleanZone = truncateZoneName(zoneName)
     if (!cleanZone) return
 
-    setCustomZones((current) =>
-      current.some((zone) => zone.toLowerCase() === cleanZone.toLowerCase())
-        ? current
-        : [...current, cleanZone],
-    )
+    addZonesToOrder([cleanZone])
   }
 
   function moveRepeaterToZone(repeaterId, zoneName) {
     const cleanZone = truncateZoneName(zoneName)
-    addCustomZone(cleanZone)
-    updateRepeater(repeaterId, { zone: cleanZone })
+    addZonesToOrder([cleanZone])
+    setRepeaters((current) => moveRepeaterToZoneEnd(current, repeaterId, cleanZone))
+  }
+
+  function moveRepeaterToPosition(repeaterId, targetRepeaterId, zoneName) {
+    const cleanZone = truncateZoneName(zoneName)
+    addZonesToOrder([cleanZone])
+    setRepeaters((current) =>
+      moveRepeaterBeforeTarget(current, repeaterId, targetRepeaterId, cleanZone),
+    )
+  }
+
+  function moveAllUnassignedToZone(zoneName, visibleIds = null) {
+    const cleanZone = truncateZoneName(zoneName)
+    if (!cleanZone || cleanZone === DEFAULT_ZONE) return
+
+    const visibleSet = visibleIds ? new Set(visibleIds) : null
+    addZonesToOrder([cleanZone])
+    setRepeaters((current) =>
+      current.map((repeater) =>
+        (repeater.zone || DEFAULT_ZONE) === DEFAULT_ZONE &&
+        (!visibleSet || visibleSet.has(repeater.id))
+          ? { ...repeater, zone: cleanZone }
+          : repeater,
+      ),
+    )
+  }
+
+  function moveRepeaterWithinZone(repeaterId, direction) {
+    setRepeaters((current) => reorderRepeaterWithinZone(current, repeaterId, direction))
+  }
+
+  function moveZone(zoneName, direction) {
+    const cleanZone = truncateZoneName(zoneName)
+    if (cleanZone === DEFAULT_ZONE) return
+
+    setZoneOrder((current) => reorderZone(current, cleanZone, direction, zones))
   }
 
   function renameZone(oldZoneName, newZoneName) {
@@ -167,7 +242,7 @@ function App() {
     const newZone = truncateZoneName(newZoneName)
     if (!newZone || oldZone === DEFAULT_ZONE || oldZone === newZone) return
 
-    setCustomZones((current) => {
+    setZoneOrder((current) => {
       const withoutOldZone = current.filter(
         (zone) => zone.toLowerCase() !== oldZone.toLowerCase(),
       )
@@ -189,7 +264,7 @@ function App() {
     const cleanZone = truncateZoneName(zoneName)
     if (cleanZone === DEFAULT_ZONE) return
 
-    setCustomZones((current) => current.filter((zone) => zone !== cleanZone))
+    setZoneOrder((current) => current.filter((zone) => zone !== cleanZone))
     setRepeaters((current) =>
       current.map((repeater) =>
         repeater.zone === cleanZone
@@ -199,10 +274,13 @@ function App() {
     )
   }
 
-  function clearSelectedZones() {
+  function clearSelectedZones(visibleIds = null) {
+    const visibleSet = visibleIds ? new Set(visibleIds) : null
     setRepeaters((current) =>
       current.map((repeater) =>
-        repeater.selected ? { ...repeater, zone: DEFAULT_ZONE } : repeater,
+        repeater.selected && (!visibleSet || visibleSet.has(repeater.id))
+          ? { ...repeater, zone: DEFAULT_ZONE }
+          : repeater,
       ),
     )
   }
@@ -241,8 +319,14 @@ function App() {
 
   const activeStepIndex = WORKFLOW_STEPS.findIndex((step) => step.id === activeStep)
   const canLeaveImport = repeaters.length > 0
+  const canLeaveRadio =
+    exportModule !== 'apx' || apxOptions.enabledBands.length > 0
   const canMoveNext =
-    activeStep === 'import' ? canLeaveImport : activeStepIndex < WORKFLOW_STEPS.length - 1
+    activeStep === 'import'
+      ? canLeaveImport
+      : activeStep === 'radio'
+        ? canLeaveRadio
+        : activeStepIndex < WORKFLOW_STEPS.length - 1
   const previousStep = WORKFLOW_STEPS[activeStepIndex - 1]
   const nextStep = WORKFLOW_STEPS[activeStepIndex + 1]
 
@@ -312,9 +396,20 @@ function App() {
 
         {activeStep === 'repeaters' ? (
           <RepeaterTable
-            repeaters={repeaters}
+            repeaters={bandFilteredRepeaters}
+            totalRepeaters={repeaters.length}
             onUpdateRepeater={updateRepeater}
             onSelectAll={setAllSelected}
+          />
+        ) : null}
+
+        {activeStep === 'radio' ? (
+          <RadioPanel
+            exportModule={exportModule}
+            onExportModuleChange={setExportModule}
+            apxOptions={apxOptions}
+            onApxOptionsChange={setApxOptions}
+            requiresBandSelection={!canLeaveRadio}
           />
         ) : null}
 
@@ -323,10 +418,14 @@ function App() {
             selectedCount={selectedRepeaters.length}
             zones={zones}
             zoneSummaries={zoneSummaries}
-            repeaters={repeaters}
+            repeaters={bandFilteredRepeaters}
             onAutoAssignZones={autoAssignSelectedZones}
             onCreateZone={addCustomZone}
             onMoveRepeaterToZone={moveRepeaterToZone}
+            onMoveRepeaterToPosition={moveRepeaterToPosition}
+            onMoveAllUnassignedToZone={moveAllUnassignedToZone}
+            onMoveRepeaterWithinZone={moveRepeaterWithinZone}
+            onMoveZone={moveZone}
             onRenameZone={renameZone}
             onDeleteZone={deleteZone}
             onClearZones={clearSelectedZones}
@@ -336,10 +435,6 @@ function App() {
         {activeStep === 'export' ? (
           <ExportPanel
             selectedCount={selectedRepeaters.length}
-            exportModule={exportModule}
-            onExportModuleChange={setExportModule}
-            apxOptions={apxOptions}
-            onApxOptionsChange={setApxOptions}
             onExport={handleExport}
           />
         ) : null}
@@ -416,6 +511,120 @@ function readSourceField(source, aliases) {
   return ''
 }
 
+function getBandFilteredRepeaters(repeaters, exportModule, enabledBands) {
+  if (exportModule !== 'apx' || !enabledBands.length) return repeaters
+
+  return repeaters.filter((repeater) =>
+    repeaterMatchesApxBands(repeater, enabledBands),
+  )
+}
+
+function applyRepeaterUpdates(repeater, updates) {
+  const next = { ...repeater, ...updates }
+
+  if (
+    !next.channelNameCustom &&
+    ['callsign', 'rxFrequency'].some((field) =>
+      Object.prototype.hasOwnProperty.call(updates, field),
+    )
+  ) {
+    next.channelName = getDisplayChannelName(next)
+  }
+
+  return next
+}
+
+function moveRepeaterToZoneEnd(repeaters, repeaterId, zoneName) {
+  const movingRepeater = repeaters.find((repeater) => repeater.id === repeaterId)
+  if (!movingRepeater) return repeaters
+
+  const movedRepeater = { ...movingRepeater, zone: zoneName }
+  const remaining = repeaters.filter((repeater) => repeater.id !== repeaterId)
+  const lastTargetIndex = remaining.reduce(
+    (lastIndex, repeater, index) =>
+      (repeater.zone || DEFAULT_ZONE) === zoneName ? index : lastIndex,
+    -1,
+  )
+  const insertIndex = lastTargetIndex === -1 ? remaining.length : lastTargetIndex + 1
+
+  return [
+    ...remaining.slice(0, insertIndex),
+    movedRepeater,
+    ...remaining.slice(insertIndex),
+  ]
+}
+
+function moveRepeaterBeforeTarget(repeaters, repeaterId, targetRepeaterId, zoneName) {
+  if (repeaterId === targetRepeaterId) return repeaters
+
+  const movingRepeater = repeaters.find((repeater) => repeater.id === repeaterId)
+  if (!movingRepeater) return repeaters
+
+  const movedRepeater = { ...movingRepeater, zone: zoneName }
+  const remaining = repeaters.filter((repeater) => repeater.id !== repeaterId)
+  const targetIndex = remaining.findIndex(
+    (repeater) => repeater.id === targetRepeaterId,
+  )
+
+  if (targetIndex === -1) {
+    return moveRepeaterToZoneEnd(repeaters, repeaterId, zoneName)
+  }
+
+  return [
+    ...remaining.slice(0, targetIndex),
+    movedRepeater,
+    ...remaining.slice(targetIndex),
+  ]
+}
+
+function reorderRepeaterWithinZone(repeaters, repeaterId, direction) {
+  const zone = repeaters.find((repeater) => repeater.id === repeaterId)?.zone || DEFAULT_ZONE
+  const zoneRepeaters = repeaters.filter(
+    (repeater) => (repeater.zone || DEFAULT_ZONE) === zone,
+  )
+  const zoneIndex = zoneRepeaters.findIndex((repeater) => repeater.id === repeaterId)
+  const swapIndex = direction === 'up' ? zoneIndex - 1 : zoneIndex + 1
+
+  if (zoneIndex < 0 || swapIndex < 0 || swapIndex >= zoneRepeaters.length) {
+    return repeaters
+  }
+
+  const reorderedZone = [...zoneRepeaters]
+  ;[reorderedZone[zoneIndex], reorderedZone[swapIndex]] = [
+    reorderedZone[swapIndex],
+    reorderedZone[zoneIndex],
+  ]
+
+  let nextZoneIndex = 0
+  return repeaters.map((repeater) =>
+    (repeater.zone || DEFAULT_ZONE) === zone
+      ? reorderedZone[nextZoneIndex++]
+      : repeater,
+  )
+}
+
+function reorderZone(currentOrder, zoneName, direction, visibleZones) {
+  const next = [...currentOrder]
+  visibleZones.forEach((zone) => {
+    if (!next.includes(zone)) next.push(zone)
+  })
+
+  const fromIndex = next.indexOf(zoneName)
+  const toIndex = direction === 'left' ? fromIndex - 1 : fromIndex + 1
+
+  if (
+    fromIndex <= 0 ||
+    toIndex <= 0 ||
+    toIndex >= next.length ||
+    next[toIndex] === DEFAULT_ZONE
+  ) {
+    return currentOrder
+  }
+
+  ;[next[fromIndex], next[toIndex]] = [next[toIndex], next[fromIndex]]
+  return next
+}
+
 function getBandZoneName(frequencyMhz) {
   const frequency = Number(frequencyMhz)
   if (frequency >= 144 && frequency <= 148) return '2m'
@@ -427,7 +636,7 @@ function getBandZoneName(frequencyMhz) {
 }
 
 function truncateZoneName(value) {
-  return String(value || DEFAULT_ZONE).trim().slice(0, ZONE_NAME_MAX_LENGTH) || DEFAULT_ZONE
+  return sanitizeApxName(value || DEFAULT_ZONE, APX_NAME_MAX_LENGTH) || DEFAULT_ZONE
 }
 
 function normalizeSourceKey(value) {

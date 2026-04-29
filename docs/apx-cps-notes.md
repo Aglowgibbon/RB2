@@ -22,6 +22,11 @@ characters. For portable exports, RB2 also lets the user choose whether the top
 display channel value uses the callsign or the first eight characters of the RX
 frequency.
 
+Zone names entered or generated in RB2 are sanitized to the same 14-character
+APX-safe limit used for Motorola APX mobile and portable XML exports. This
+keeps the visible Zone Organizer names aligned with the names written to APX CPS
+XML.
+
 RB2 removes non-ASCII display characters for the APX-friendly export because
 radio displays and CPS language settings can restrict unsupported characters and
 diacritics. If RB2 has to shorten a name for APX export, the original RB2 name is
@@ -53,8 +58,15 @@ The XML export currently creates:
 The Zone Organizer keeps unassigned channels on the left and zones on the right.
 Users can create zones, rename zones, delete zones, and drag channel cards
 between zones. Deleting a populated zone asks for confirmation and returns those
-channels to Unassigned. Quick grouping can organize selected channels by state,
-county, city, amateur band, or mode before XML export.
+channels to Unassigned. Users can move all unassigned channels into a zone in
+one action, reorder zones, and reorder channels inside a zone. The visible zone
+order and channel order are used for the APX zone channel assignment positions.
+Quick grouping can organize selected channels by state, county, city, amateur
+band, or mode before XML export.
+
+For portable exports, RB2 warns when a zone has more than 16 channels. Portable
+exports split those channels into multiple CPS zones in 16-channel chunks for
+selector knob positions. Mobile exports keep the selected RB2 zone together.
 
 APX XML export infers analog FM and P25 conventional channels from RepeaterBook
 mode data. If a row lists both FM and P25, RB2 exports separate APX channels for
@@ -68,15 +80,19 @@ field first. It accepts NAC values in the familiar hexadecimal form such as
 P25 row has no valid `Digital Access` value, RB2 uses the APX default P25 NAC
 value.
 
-The repeater review table shows the imported P25 NAC value. Channel name is
-editable by default. Use table edit mode only when imported data needs
-correction; edits to mode or NAC are used by the APX XML exporter. Zone
-assignment is handled in the Zone Organizer step.
+The repeater review table shows the imported P25 NAC value and the default radio
+channel name that will be exported for zone channel assignment. That name is
+computed from the callsign and RX frequency unless the user customizes it; a
+custom name overrides the default export name. The channel-name edit mode opens
+channel names for customization. Imported-data edit mode allows source data
+correction; edits to callsign, RX frequency, mode, or NAC are used by the APX
+XML exporter. Zone assignment is handled in the Zone Organizer step.
 
 Select the APX target radio bands before exporting. No APX bands are selected
 by default. RB2 filters out channels whose RX or TX frequency is outside the
-selected APX bands. Current band filters are VHF, UHF 1, UHF 2, 700/800 MHz,
-and 900 MHz.
+selected APX bands. The current amateur-radio APX band filters are VHF, UHF 1,
+and 900 MHz. When APX target bands are selected, the repeater review and zone
+organizer steps show only repeaters that match those bands.
 
 Select APX Mobile or APX Portable before exporting. Portable zone/channel
 assignment records include top-display, color backlight, and personnel
