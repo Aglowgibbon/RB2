@@ -2,8 +2,6 @@ import { APX_NAME_MAX_LENGTH } from '../modules/apx/apxConstraints'
 import { APX_BANDS } from '../modules/apx/apxBands'
 
 function RadioPanel({
-  exportModule,
-  onExportModuleChange,
   apxOptions,
   onApxOptionsChange,
   requiresBandSelection,
@@ -34,30 +32,13 @@ function RadioPanel({
   return (
     <section className="panel radio-panel" aria-labelledby="radio-title">
       <div>
-        <h2 id="radio-title">Radio Type</h2>
+        <h2 id="radio-title">Motorola APX Settings</h2>
         <p>
-          Choose the export module and radio settings before reviewing repeater
-          data.
+          Choose APX radio settings before reviewing repeater data.
         </p>
       </div>
 
       <div className="export-controls">
-        <div className="control-group module-group">
-          <div className="control-group-heading">
-            <h3>Module</h3>
-            <p>Choose the radio family/export target.</p>
-          </div>
-          <label className="field-control">
-            <span>Export module</span>
-            <select
-              value={exportModule}
-              onChange={(event) => onExportModuleChange(event.target.value)}
-            >
-              <option value="apx">Motorola APX</option>
-            </select>
-          </label>
-        </div>
-
         <div className="control-group xml-settings">
           <div className="control-group-heading">
             <h3>APX XML</h3>

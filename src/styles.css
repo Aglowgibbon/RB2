@@ -137,7 +137,7 @@ h3 {
 
 .workflow-nav {
   display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
   gap: 8px;
 }
 
@@ -295,6 +295,305 @@ button:disabled {
   font-weight: 800;
   text-align: center;
   background: var(--surface);
+}
+
+.brand-panel {
+  display: grid;
+  gap: 16px;
+  align-items: stretch;
+  justify-content: stretch;
+}
+
+.brand-card-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(240px, 1fr));
+  gap: 12px;
+  width: 100%;
+}
+
+.brand-card {
+  display: grid;
+  gap: 8px;
+  min-height: 150px;
+  padding: 18px;
+  border: 1px solid #d8e0ea;
+  border-radius: 8px;
+  color: #17202a;
+  text-align: left;
+  background: #ffffff;
+}
+
+.brand-card:hover:not(:disabled),
+.brand-card.selected {
+  border-color: #8eb9f5;
+  color: #102740;
+  background: #f3f8ff;
+}
+
+.brand-card-name {
+  color: #151b23;
+  font-size: 1.2rem;
+  font-weight: 850;
+}
+
+.brand-card-target {
+  width: fit-content;
+  padding: 4px 8px;
+  border: 1px solid #c8d8ee;
+  border-radius: 999px;
+  color: #1d344f;
+  font-size: 0.76rem;
+  font-weight: 850;
+  background: var(--blue-soft);
+}
+
+.brand-card-description {
+  color: var(--muted);
+  font-size: 0.92rem;
+  font-weight: 650;
+  line-height: 1.4;
+}
+
+.import-workspace {
+  display: grid;
+  gap: 14px;
+}
+
+.kpg-live-panel {
+  display: grid;
+  gap: 16px;
+  align-items: stretch;
+  justify-content: stretch;
+}
+
+.kpg-live-panel .panel-heading {
+  align-items: center;
+}
+
+.kpg-selected-count {
+  display: inline-grid;
+  min-height: 32px;
+  place-items: center;
+  padding: 0 10px;
+  border: 1px solid #c8d8ee;
+  border-radius: 6px;
+  color: #1d344f;
+  font-size: 0.84rem;
+  font-weight: 850;
+  white-space: nowrap;
+  background: var(--blue-soft);
+}
+
+.kpg-workspace {
+  display: grid;
+  gap: 14px;
+  min-width: 0;
+}
+
+.kpg-controls {
+  display: grid;
+  grid-template-columns: minmax(320px, 0.9fr) minmax(320px, 1.1fr);
+  gap: 12px;
+  min-width: 0;
+}
+
+.kpg-selector-group,
+.kpg-options-group {
+  display: grid;
+  align-content: start;
+  gap: 12px;
+}
+
+.kpg-control-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(130px, 1fr));
+  gap: 10px;
+}
+
+.county-tools {
+  display: grid;
+  gap: 9px;
+}
+
+.kpg-button-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.kpg-button-row button {
+  min-height: 34px;
+  padding: 0 11px;
+}
+
+.county-list {
+  display: grid;
+  max-height: 330px;
+  overflow: auto;
+  border: 1px solid #d8e0ea;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.county-row {
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr) 44px;
+  gap: 7px;
+  align-items: center;
+  min-height: 34px;
+  padding: 6px 8px;
+  border-bottom: 1px solid #edf1f5;
+  color: #263548;
+  font-size: 0.88rem;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.county-row:last-child {
+  border-bottom: 0;
+}
+
+.county-row:hover {
+  background: #f6f9fc;
+}
+
+.county-row span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.county-row small {
+  color: var(--muted);
+  font-size: 0.72rem;
+  text-align: right;
+}
+
+.empty-county-row {
+  grid-template-columns: 1fr;
+  color: var(--muted);
+  cursor: default;
+}
+
+.kpg-checkbox-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(130px, 1fr));
+  gap: 8px;
+}
+
+.kpg-checkbox-grid label {
+  display: flex;
+  gap: 7px;
+  align-items: center;
+  min-height: 34px;
+  padding: 7px 8px;
+  border: 1px solid #d8e0ea;
+  border-radius: 6px;
+  color: #263548;
+  font-size: 0.84rem;
+  font-weight: 700;
+  background: #ffffff;
+}
+
+.kpg-checkbox-grid input {
+  flex: 0 0 auto;
+}
+
+.kpg-status {
+  min-height: 38px;
+  padding: 9px 11px;
+  border: 1px solid #d8e0ea;
+  border-radius: 8px;
+  color: var(--muted);
+  font-size: 0.88rem;
+  background: #ffffff;
+}
+
+.kpg-status.good {
+  border-color: #9ccaae;
+  color: #19734e;
+  background: #f1fbf5;
+}
+
+.kpg-status.bad {
+  border-color: #dea2a2;
+  color: #a33232;
+  background: #fff2f2;
+}
+
+.kpg-results-empty {
+  display: grid;
+  min-height: 180px;
+  place-items: center;
+  padding: 18px;
+  border: 1px dashed #bcc9d9;
+  border-radius: 8px;
+  color: var(--muted);
+  text-align: center;
+  background: #ffffff;
+}
+
+.kpg-results {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+}
+
+.kpg-run-summary {
+  padding: 11px 12px;
+  border: 1px solid #d8e0ea;
+  border-radius: 8px;
+  color: #334255;
+  background: #ffffff;
+}
+
+.kpg-result-card {
+  display: grid;
+  gap: 10px;
+  overflow: hidden;
+  border: 1px solid #d8e0ea;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.kpg-result-head {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px;
+  border-bottom: 1px solid #e8edf3;
+  background: #fbfcfd;
+}
+
+.kpg-result-head p {
+  margin-top: 3px;
+  font-size: 0.78rem;
+}
+
+.kpg-warning-list {
+  display: grid;
+  gap: 4px;
+  margin: 0 12px;
+  padding-left: 18px;
+  color: #805c00;
+  font-size: 0.84rem;
+}
+
+.kpg-preview-wrap {
+  max-height: min(44vh, 560px);
+  overflow: auto;
+}
+
+.kpg-preview-table {
+  min-width: 960px;
+}
+
+.kpg-preview-table th,
+.kpg-preview-table td {
+  padding: 8px 10px;
+  font-size: 0.82rem;
+  white-space: nowrap;
 }
 
 .zone-form,
@@ -936,6 +1235,15 @@ input[type='checkbox'] {
     grid-template-columns: 1fr;
   }
 
+  .kpg-controls {
+    grid-template-columns: 1fr;
+  }
+
+  .kpg-control-grid,
+  .kpg-checkbox-grid {
+    grid-template-columns: repeat(2, minmax(130px, 1fr));
+  }
+
   .module-group,
   .xml-settings {
     grid-column: auto;
@@ -991,6 +1299,7 @@ input[type='checkbox'] {
   .zone-actions button,
   .table-actions button,
   .step-actions button,
+  .kpg-button-row button,
   .field-control,
   .field-control input,
   .field-control select,
@@ -1014,8 +1323,17 @@ input[type='checkbox'] {
   }
 
   .zone-panel .zone-form,
-  .zone-panel .zone-actions {
+  .zone-panel .zone-actions,
+  .brand-card-grid,
+  .kpg-control-grid,
+  .kpg-checkbox-grid {
     grid-template-columns: 1fr;
+  }
+
+  .kpg-live-panel .panel-heading,
+  .kpg-result-head {
+    align-items: stretch;
+    flex-direction: column;
   }
 
   .step-actions {

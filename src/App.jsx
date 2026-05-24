@@ -7,21 +7,29 @@ import { exportApxCsv } from './modules/apx/exportApxCsv'
 import { repeaterMatchesApxBands } from './modules/apx/apxBands'
 import { exportApxCpsXml } from './modules/apx/exportApxCpsXml'
 import { exportGenericCsv } from './modules/generic/exportGenericCsv'
+import BrandPanel from './components/BrandPanel'
 import ImportPanel from './components/ImportPanel'
 import RadioPanel from './components/RadioPanel'
 import RepeaterTable from './components/RepeaterTable'
 import ZoneBuilder from './components/ZoneBuilder'
 import ExportPanel from './components/ExportPanel'
+import KpgLivePanel from './components/KpgLivePanel'
 import rb2Logo from './assets/rb2-logo.png'
 import './styles.css'
 
 const DEFAULT_ZONE = 'Unassigned'
-const WORKFLOW_STEPS = [
+const BRAND_STEP = { id: 'brand', label: 'Brand' }
+const MOTOROLA_WORKFLOW_STEPS = [
+  BRAND_STEP,
   { id: 'import', label: 'Import' },
-  { id: 'radio', label: 'Radio' },
+  { id: 'radio', label: 'APX Settings' },
   { id: 'repeaters', label: 'Repeaters' },
   { id: 'zones', label: 'Zones' },
   { id: 'export', label: 'Export' },
+]
+const KENWOOD_WORKFLOW_STEPS = [
+  BRAND_STEP,
+  { id: 'kpg', label: 'KPG-D1N' },
 ]
 
 function downloadCsv(filename, csvText) {
@@ -40,8 +48,11 @@ function App() {
   const [repeaters, setRepeaters] = useState([])
   const [zoneOrder, setZoneOrder] = useState([DEFAULT_ZONE])
   const [importName, setImportName] = useState('')
-  const [message, setMessage] = useState('Import a RepeaterBook CSV to begin.')
-  const [activeStep, setActiveStep] = useState('import')
+  const [message, setMessage] = useState(
+    'Import a RepeaterBook CSV for the selected Motorola workflow.',
+  )
+  const [activeStep, setActiveStep] = useState('brand')
+  const [radioBrand, setRadioBrand] = useState('')
   const [exportModule, setExportModule] = useState('apx')
   const [apxOptions, setApxOptions] = useState({
     personalityName: 'RB2',
@@ -317,20 +328,46 @@ function App() {
     )
   }
 
-  const activeStepIndex = WORKFLOW_STEPS.findIndex((step) => step.id === activeStep)
+  const workflowSteps = getWorkflowSteps(radioBrand)
+  const activeStepIndex = workflowSteps.findIndex((step) => step.id === activeStep)
+  const currentStepIndex = activeStepIndex === -1 ? 0 : activeStepIndex
   const canLeaveImport = repeaters.length > 0
   const canLeaveRadio =
     exportModule !== 'apx' || apxOptions.enabledBands.length > 0
   const canMoveNext =
-    activeStep === 'import'
+    activeStep === 'brand'
+      ? Boolean(radioBrand)
+      : activeStep === 'import'
       ? canLeaveImport
       : activeStep === 'radio'
         ? canLeaveRadio
-        : activeStepIndex < WORKFLOW_STEPS.length - 1
-  const previousStep = WORKFLOW_STEPS[activeStepIndex - 1]
-  const nextStep = WORKFLOW_STEPS[activeStepIndex + 1]
+        : currentStepIndex < workflowSteps.length - 1
+  const previousStep = workflowSteps[currentStepIndex - 1]
+  const nextStep = workflowSteps[currentStepIndex + 1]
+
+  function handleBrandSelect(brand) {
+    setRadioBrand(brand)
+
+    if (brand === 'motorola') {
+      setExportModule('apx')
+      setMessage('Import a RepeaterBook CSV for the Motorola APX workflow.')
+      setActiveStep('import')
+      return
+    }
+
+    if (brand === 'kenwood') {
+      setActiveStep('kpg')
+    }
+  }
 
   function goToStep(stepId) {
+    if (stepId === 'brand') {
+      setActiveStep(stepId)
+      return
+    }
+
+    if (stepId === 'kpg' && radioBrand !== 'kenwood') return
+    if (radioBrand !== 'motorola') return
     if (stepId !== 'import' && repeaters.length === 0) return
     setActiveStep(stepId)
   }
@@ -354,7 +391,7 @@ function App() {
             alt="RB2 Amateur Radio Codeplug Imports"
           />
           <div className="masthead-copy">
-            <h1>RepeaterBook CSV to Radio Codeplug Import Files</h1>
+            <h1>RepeaterBook to Radio Codeplug Import Files</h1>
             <p className="lede">
               Import repeaters, build zones, and export to an importable file
               compatible with your radio's programming software.
@@ -365,9 +402,9 @@ function App() {
 
       <section className="workspace" aria-label="RB2 repeater workflow">
         <nav className="workflow-nav" aria-label="Workflow steps">
-          {WORKFLOW_STEPS.map((step, index) => {
+          {workflowSteps.map((step, index) => {
             const isActive = step.id === activeStep
-            const isAvailable = step.id === 'import' || repeaters.length > 0
+            const isAvailable = isStepAvailable(step.id, radioBrand, repeaters)
 
             return (
               <button
@@ -384,15 +421,26 @@ function App() {
           })}
         </nav>
 
-        <div className="status-strip" aria-live="polite">
-          <span>{repeaters.length} repeaters loaded</span>
-          <span>{selectedRepeaters.length} selected</span>
-          <span>{zones.length} zones</span>
-        </div>
+        {radioBrand === 'motorola' ? (
+          <div className="status-strip" aria-live="polite">
+            <span>{repeaters.length} repeaters loaded</span>
+            <span>{selectedRepeaters.length} selected</span>
+            <span>{zones.length} zones</span>
+          </div>
+        ) : null}
+
+        {activeStep === 'brand' ? (
+          <BrandPanel
+            selectedBrand={radioBrand}
+            onSelectBrand={handleBrandSelect}
+          />
+        ) : null}
 
         {activeStep === 'import' ? (
           <ImportPanel onFilesLoaded={handleFilesLoaded} message={message} />
         ) : null}
+
+        {activeStep === 'kpg' ? <KpgLivePanel /> : null}
 
         {activeStep === 'repeaters' ? (
           <RepeaterTable
@@ -405,8 +453,6 @@ function App() {
 
         {activeStep === 'radio' ? (
           <RadioPanel
-            exportModule={exportModule}
-            onExportModuleChange={setExportModule}
             apxOptions={apxOptions}
             onApxOptionsChange={setApxOptions}
             requiresBandSelection={!canLeaveRadio}
@@ -439,28 +485,33 @@ function App() {
           />
         ) : null}
 
-        <div className="step-actions">
-          <button
-            className="secondary-button"
-            type="button"
-            disabled={!previousStep}
-            onClick={goToPreviousStep}
-          >
-            Back
-          </button>
-          <button
-            type="button"
-            disabled={!canMoveNext}
-            onClick={goToNextStep}
-          >
-            {nextStep ? `Next: ${nextStep.label}` : 'Workflow complete'}
-          </button>
-        </div>
+        {previousStep || nextStep ? (
+          <div className="step-actions">
+            {previousStep ? (
+              <button
+                className="secondary-button"
+                type="button"
+                onClick={goToPreviousStep}
+              >
+                Back
+              </button>
+            ) : null}
+            {nextStep ? (
+              <button
+                type="button"
+                disabled={!canMoveNext}
+                onClick={goToNextStep}
+              >
+                Next: {nextStep.label}
+              </button>
+            ) : null}
+          </div>
+        ) : null}
       </section>
 
       <footer className="app-footer">
         <p>
-          RB2 is a browser-only amateur radio programming helper for user-reviewable import files; data can be exported from{' '}
+          RB2 is an amateur radio programming helper for user-reviewable import files; data can be exported from{' '}
           <a
             href="https://www.repeaterbook.com/"
             target="_blank"
@@ -495,6 +546,20 @@ function buildZoneName(repeater, strategy) {
   }
 
   return truncateZoneName(zoneByStrategy[strategy] || DEFAULT_ZONE)
+}
+
+function getWorkflowSteps(radioBrand) {
+  if (radioBrand === 'motorola') return MOTOROLA_WORKFLOW_STEPS
+  if (radioBrand === 'kenwood') return KENWOOD_WORKFLOW_STEPS
+  return [BRAND_STEP]
+}
+
+function isStepAvailable(stepId, radioBrand, repeaters) {
+  if (stepId === 'brand') return true
+  if (stepId === 'kpg') return radioBrand === 'kenwood'
+  if (radioBrand !== 'motorola') return false
+  if (stepId === 'import') return true
+  return repeaters.length > 0
 }
 
 function readSourceField(source, aliases) {
